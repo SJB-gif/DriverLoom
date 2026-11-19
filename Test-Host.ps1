@@ -22,7 +22,7 @@ try{
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name)
     }
     [void][IO.Directory]::CreateDirectory((Join-Path $stage 'assets'))
-    foreach($name in 'DriverLoom.ico','DriverLoom-brand.png','GitHub-light.png','GitHub-dark.png'){
+    foreach($name in 'DriverLoom-loops.ico','DriverLoom-brand.png','GitHub-light.png','GitHub-dark.png'){
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('assets\'+$name)) -Destination (Join-Path $stage 'assets')
     }
     $exe=Join-Path $stage 'DriverLoom.exe'
@@ -30,6 +30,7 @@ try{
     $env:LOCALAPPDATA=Join-Path $testRoot 'state'
     $result=(Invoke-NativeTest $exe @('-SmokeTest'))|ConvertFrom-Json
     if($result.NativeProcess -ne 'DriverLoom' -or $result.NativeAppID -ne 'SJB.DriverLoom' -or !$result.Is64BitProcess -or $result.ApartmentState -ne 'STA' -or !$result.Visible){throw 'Native application identity, bitness or startup failed.'}
+    if($result.TaskbarWindowID -ne 'SJB.DriverLoom' -or $result.TaskbarIcon -ne ((Join-Path $stage 'assets\DriverLoom-loops.ico')+',0') -or $result.TaskbarCommand -ne ('"'+$exe+'"') -or $result.TaskbarName -ne 'DriverLoom'){throw 'Taskbar window icon or relaunch metadata was not applied.'}
     $link=Join-Path $stage 'DriverLoom test.lnk'
     $shell=New-Object -ComObject WScript.Shell
     $shortcut=$shell.CreateShortcut($link);$shortcut.TargetPath=$exe;$shortcut.Save()
@@ -42,7 +43,7 @@ try{
     Copy-Item -LiteralPath $exe -Destination (Join-Path $broken 'DriverLoom.exe')
     $null=Invoke-NativeTest (Join-Path $broken 'DriverLoom.exe') @('-SmokeTest') 1
     if(!(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher\host-error.log'))){throw 'Native startup error was not logged.'}
-    Write-Output 'Native host checks passed: DriverLoom process/icon identity, shortcut AppID, Windows PowerShell background job, STA, paths with spaces and failure reporting.'
+    Write-Output 'Native host checks passed: explicit taskbar window icon/relaunch metadata, process and shortcut AppID, background jobs, STA, paths with spaces and failure reporting.'
 }finally{
     $env:LOCALAPPDATA=$originalLocalAppData
     $resolved=[IO.Path]::GetFullPath($testRoot)

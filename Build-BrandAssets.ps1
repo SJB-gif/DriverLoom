@@ -17,7 +17,7 @@ foreach($size in 16,20,24,32,40,48,64,128,256) {
         if($size -eq 256){[IO.File]::WriteAllBytes((Join-Path $assets 'DriverLoom.png'),$stream.ToArray())}
     } finally {$stream.Dispose();$graphics.Dispose();$bitmap.Dispose()}
 }
-$file=[IO.File]::Create((Join-Path $assets 'DriverLoom.ico'))
+$file=[IO.File]::Create((Join-Path $assets 'DriverLoom-loops.ico'))
 $writer=[IO.BinaryWriter]::new($file)
 try {
     $writer.Write([uint16]0);$writer.Write([uint16]1);$writer.Write([uint16]$frames.Count)

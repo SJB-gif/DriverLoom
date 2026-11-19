@@ -79,13 +79,13 @@ try {
     Assert-Installer $false (Test-Path -LiteralPath $legacyShortcutPath) 'legacy shortcut replaced during upgrade'
     Assert-Installer $script:LauncherVersion $registration.DisplayVersion 'installed version'
     Assert-Installer $installRoot $registration.InstallLocation 'installation path with spaces'
-    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
+    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom-loops.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
         Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash "$name payload matches source"
     }
     Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'dist\host\DriverLoom.exe')).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot 'DriverLoom.exe')).Hash 'native host matches build'
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
-    Assert-Installer ((Join-Path $installRoot 'assets\DriverLoom.ico')+',0') $shortcut.IconLocation 'branded shortcut icon'
+    Assert-Installer ((Join-Path $installRoot 'assets\DriverLoom-loops.ico')+',0') $shortcut.IconLocation 'branded shortcut icon'
     Assert-Installer $true ([string]::Equals((Join-Path $installRoot 'DriverLoom.exe'), $shortcut.TargetPath, [StringComparison]::OrdinalIgnoreCase)) 'shortcut uses native DriverLoom executable'
     Assert-Installer '' $shortcut.Arguments 'shortcut has no PowerShell command line'
     [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut)
@@ -96,6 +96,10 @@ try {
     Assert-Installer $true $startup.Is64BitProcess 'installed application bitness'
     Assert-Installer 'DriverLoom' $startup.NativeProcess 'taskbar executable identity'
     Assert-Installer 'SJB.DriverLoom' $startup.NativeAppID 'taskbar process AppID'
+    Assert-Installer 'SJB.DriverLoom' $startup.TaskbarWindowID 'taskbar window AppID'
+    Assert-Installer ((Join-Path $installRoot 'assets\DriverLoom-loops.ico')+',0') $startup.TaskbarIcon 'taskbar window uses fresh loop icon resource'
+    Assert-Installer ('"'+(Join-Path $installRoot 'DriverLoom.exe')+'"') $startup.TaskbarCommand 'taskbar relaunch path with spaces'
+    Assert-Installer 'DriverLoom' $startup.TaskbarName 'taskbar display name'
 
     # Execute the finish-page command from a real 32-bit process (the NSIS host architecture).
     $wow64Test = Join-Path $testRoot 'finish-page-command.ps1'

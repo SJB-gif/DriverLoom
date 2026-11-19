@@ -511,8 +511,9 @@ Install-DriverOffers ('$json' | ConvertFrom-Json)
 }
 
 $form = [DriverLoom.UI.MainWindow]::new()
+$form.Add_HandleCreated({param($sender,$eventArgs)if('DriverLoom.ShellIdentity' -as [type]){[DriverLoom.ShellIdentity]::BindWindow($sender.Handle)}})
 $form.Text = "DriverLoom $script:LauncherVersion"
-$form.Icon=[Drawing.Icon]::new((Join-Path $PSScriptRoot 'assets\DriverLoom.ico'))
+$form.Icon=[Drawing.Icon]::new((Join-Path $PSScriptRoot 'assets\DriverLoom-loops.ico'))
 $form.Font=[Drawing.Font]::new('Segoe UI',10)
 $form.StartPosition='CenterScreen';$form.ClientSize=[Drawing.Size]::new(1240,850);$form.MinimumSize=[Drawing.Size]::new(1040,660);$form.AutoScaleMode='Dpi'
 $tooltips=[Windows.Forms.ToolTip]::new()
@@ -619,6 +620,10 @@ $form.Add_Shown({
             Footer = $status.Text
             NativeProcess = [Diagnostics.Process]::GetCurrentProcess().ProcessName
             NativeAppID = if('DriverLoom.ShellIdentity' -as [type]){[DriverLoom.ShellIdentity]::CurrentId()}else{''}
+            TaskbarWindowID = if('DriverLoom.ShellIdentity' -as [type]){[DriverLoom.ShellIdentity]::WindowProperty($form.Handle,5)}else{''}
+            TaskbarIcon = if('DriverLoom.ShellIdentity' -as [type]){[DriverLoom.ShellIdentity]::WindowProperty($form.Handle,3)}else{''}
+            TaskbarCommand = if('DriverLoom.ShellIdentity' -as [type]){[DriverLoom.ShellIdentity]::WindowProperty($form.Handle,2)}else{''}
+            TaskbarName = if('DriverLoom.ShellIdentity' -as [type]){[DriverLoom.ShellIdentity]::WindowProperty($form.Handle,4)}else{''}
             ProductName = 'DriverLoom'
             WindowTitle = $form.Text
             ThemePreference = [DriverLoom.UI.Palette]::Preference

@@ -2,7 +2,7 @@
 
 An MIT-licensed Windows 10/11 x64 prototype for recording hardware, checking saved manufacturer sources and applying eligible Windows Update drivers.
 
-Current source: **0.1.6**, maintained at [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/HardwareUpdateLauncher). See the [0.1.6 changes](docs/RELEASE_NOTES_0.1.6.md), [coverage matrix](docs/COVERAGE.md) and [earlier Windows verification](docs/VERIFICATION.md). No release has been published yet.
+Current source: **0.1.7**, maintained at [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/HardwareUpdateLauncher). See the [0.1.7 changes](docs/RELEASE_NOTES_0.1.7.md), [coverage matrix](docs/COVERAGE.md) and [earlier Windows verification](docs/VERIFICATION.md). No release has been published yet.
 
 ## Run it
 

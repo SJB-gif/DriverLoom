@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("DriverLoom")]
 [assembly: System.Reflection.AssemblyProduct("DriverLoom")]
-[assembly: System.Reflection.AssemblyVersion("0.1.6.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.1.6.0")]
+[assembly: System.Reflection.AssemblyVersion("0.1.7.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.1.7.0")]
 
 namespace DriverLoom
 {
@@ -39,6 +39,35 @@ namespace DriverLoom
             void SetValue(ref PropertyKey key, ref Variant value); void Commit();
         }
         [DllImport("ole32.dll")] static extern int PropVariantClear(ref Variant value);
+        [DllImport("shell32.dll", PreserveSig = false)] static extern void SHGetPropertyStoreForWindow(IntPtr window, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern void SHChangeNotify(uint change, uint flags, string item, IntPtr second);
+        static PropertyKey Key(uint id) { return new PropertyKey { Format = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), Id = id }; }
+        static void Write(IPropertyStore store, uint id, string text)
+        {
+            PropertyKey key = Key(id); Variant value = new Variant { Type = 31, Text = Marshal.StringToCoTaskMemUni(text) };
+            try { store.SetValue(ref key, ref value); } finally { PropVariantClear(ref value); }
+        }
+        public static void BindWindow(IntPtr window)
+        {
+            IPropertyStore store; Guid iid = typeof(IPropertyStore).GUID; SHGetPropertyStoreForWindow(window, ref iid, out store);
+            try
+            {
+                string root = AppDomain.CurrentDomain.BaseDirectory;
+                Write(store, 2, "\"" + Path.Combine(root, "DriverLoom.exe") + "\"");
+                Write(store, 3, Path.Combine(root, "assets", "DriverLoom-loops.ico") + ",0");
+                Write(store, 4, "DriverLoom");
+                Write(store, 5, AppId);
+                store.Commit();
+            }
+            finally { Marshal.FinalReleaseComObject(store); }
+        }
+        public static string WindowProperty(IntPtr window, uint id)
+        {
+            IPropertyStore store; Guid iid = typeof(IPropertyStore).GUID; SHGetPropertyStoreForWindow(window, ref iid, out store);
+            PropertyKey key = Key(id); Variant value = new Variant();
+            try { store.GetValue(ref key, out value); return value.Type == 31 ? Marshal.PtrToStringUni(value.Text) : ""; }
+            finally { PropVariantClear(ref value); Marshal.FinalReleaseComObject(store); }
+        }
         public static string ShortcutId(string path, bool write)
         {
             object link = new ShellLink();
@@ -50,7 +79,7 @@ namespace DriverLoom
                 Variant value = new Variant();
                 try
                 {
-                    if (write) { value.Type = 31; value.Text = Marshal.StringToCoTaskMemUni(AppId); store.SetValue(ref key, ref value); store.Commit(); ((IPersistFile)link).Save(path, true); return AppId; }
+                    if (write) { value.Type = 31; value.Text = Marshal.StringToCoTaskMemUni(AppId); store.SetValue(ref key, ref value); store.Commit(); ((IPersistFile)link).Save(path, true); SHChangeNotify(0x2000, 0x1005, path, IntPtr.Zero); return AppId; }
                     store.GetValue(ref key, out value); return value.Type == 31 ? Marshal.PtrToStringUni(value.Text) : "";
                 }
                 finally { PropVariantClear(ref value); }

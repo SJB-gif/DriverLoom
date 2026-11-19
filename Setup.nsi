@@ -8,7 +8,7 @@ ManifestSupportedOS Win10
 !include "x64.nsh"
 
 !define APP "DriverLoom"
-!define VERSION "0.1.6"
+!define VERSION "0.1.7"
 !define UNINSTALL "Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher"
 !ifndef OUTPUT_EXE
   !define OUTPUT_EXE "DriverLoom-Setup.exe"
@@ -19,15 +19,15 @@ OutFile "${OUTPUT_EXE}"
 InstallDir "$LOCALAPPDATA\Programs\HardwareUpdateLauncher"
 ShowInstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.6.0"
+VIProductVersion "0.1.7.0"
 VIAddVersionKey "ProductName" "${APP}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${APP} Setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "DriverLoom contributors"
 
-!define MUI_ICON "assets\DriverLoom.ico"
-!define MUI_UNICON "assets\DriverLoom.ico"
+!define MUI_ICON "assets\DriverLoom-loops.ico"
+!define MUI_UNICON "assets\DriverLoom-loops.ico"
 
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Open DriverLoom"
@@ -82,7 +82,7 @@ Section "Install"
   File "dist\host\DriverLoom.exe"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   SetOutPath "$INSTDIR\assets"
-  File "assets\DriverLoom.ico"
+  File "assets\DriverLoom-loops.ico"
   File "assets\DriverLoom.png"
   File "assets\DriverLoom-brand.png"
   File "assets\GitHub-light.png"
@@ -91,13 +91,13 @@ Section "Install"
 
   # Keep the existing installation/data identity so this also upgrades pre-branding builds.
   Delete "$SMPROGRAMS\Hardware Update Launcher.lnk"
-  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\DriverLoom.exe" "" "$INSTDIR\assets\DriverLoom.ico"
+  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\DriverLoom.exe" "" "$INSTDIR\assets\DriverLoom-loops.ico"
   ExecWait '"$INSTDIR\DriverLoom.exe" --shortcut-id "$SMPROGRAMS\${APP}.lnk"' $0
 
   WriteRegStr HKCU "${UNINSTALL}" "DisplayName" "${APP}"
   WriteRegStr HKCU "${UNINSTALL}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINSTALL}" "Publisher" "DriverLoom contributors"
-  WriteRegStr HKCU "${UNINSTALL}" "DisplayIcon" "$INSTDIR\assets\DriverLoom.ico"
+  WriteRegStr HKCU "${UNINSTALL}" "DisplayIcon" "$INSTDIR\assets\DriverLoom-loops.ico"
   WriteRegStr HKCU "${UNINSTALL}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "${UNINSTALL}" "NoModify" 1
@@ -125,6 +125,7 @@ Section "Uninstall"
   Delete "$INSTDIR\Coverage.ps1"
   Delete "$INSTDIR\Theme.ps1"
   Delete "$INSTDIR\Theme.cs"
+  Delete "$INSTDIR\assets\DriverLoom-loops.ico"
   Delete "$INSTDIR\assets\DriverLoom.ico"
   Delete "$INSTDIR\assets\DriverLoom.png"
   Delete "$INSTDIR\assets\DriverLoom-brand.png"
