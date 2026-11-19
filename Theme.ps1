@@ -8,14 +8,14 @@ function Set-AppTheme([string]$preference = 'Dark', $root = $null) {
     if ($root) { [DriverLoom.UI.Theme]::Apply($root) }
 }
 
-function Get-DisplayStatus([string]$status) {
+function Get-DisplayStatus([string]$status, [string]$manager = '') {
     switch ($status) {
         'Newer at source' { 'UPDATE AVAILABLE' }
         'Current at source' { 'UP TO DATE' }
         'Installed version is higher' { 'INSTALLED IS NEWER' }
         'Unsupported' { 'UNSUPPORTED' }
-        'Managed by software' { 'VENDOR APP' }
-        'Manual check required' { 'MANUAL CHECK' }
+        'Managed by software' { if($manager){$manager}else{'MANUAL CHECK'} }
+        'Manual check required' { if($manager){$manager}else{'MANUAL CHECK'} }
         default { 'PACKAGE DETAILS' }
     }
 }

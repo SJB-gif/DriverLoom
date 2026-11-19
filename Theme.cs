@@ -219,6 +219,39 @@ namespace DriverLoom.UI
         public override Color MenuBorder { get { return Palette.Border; } }
     }
 
+    public class SettingsWindow : Form, IMessageFilter
+    {
+        protected override void OnShown(EventArgs e)
+        {
+            Application.AddMessageFilter(this);
+            base.OnShown(e);
+        }
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            Application.RemoveMessageFilter(this);
+            base.OnFormClosed(e);
+        }
+        public bool PreFilterMessage(ref Message message)
+        {
+            if (!Visible || IsDisposed || Owner == null) return false;
+            if (message.Msg != 0x0201 && message.Msg != 0x0204 && message.Msg != 0x0207 && message.Msg != 0x00A1 && message.Msg != 0x00A4 && message.Msg != 0x00A7) return false;
+            Control target = Control.FromChildHandle(message.HWnd);
+            if (target == null || target.FindForm() != Owner) return false;
+            // Consume the dismissing click so it cannot also start a main-window action.
+            Close();
+            return true;
+        }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape) { e.Handled = true; e.SuppressKeyPress = true; Close(); }
+            base.OnKeyDown(e);
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            using (Pen pen = new Pen(Palette.Border)) e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+        }
+    }
     public class DeviceGrid : DataGridView
     {
         public bool Decorated { get; set; }
@@ -256,11 +289,15 @@ namespace DriverLoom.UI
                 Color color = update ? Palette.Accent : value == "UP TO DATE" ? Palette.Positive : Palette.Muted;
                 using (Font font = new Font("Consolas", 8.5f, FontStyle.Bold))
                 {
-                    Size size = TextRenderer.MeasureText(value, font);
-                    Rectangle pill = new Rectangle(bounds.X + 14, bounds.Y + (bounds.Height - 24) / 2, Math.Min(size.Width + 10, bounds.Width - 24), 24);
+                    bool method = Convert.ToString(Rows[e.RowIndex].Cells[e.ColumnIndex].Tag) == "UpdateMethod";
+                    TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix;
+                    flags |= method ? TextFormatFlags.WordBreak : TextFormatFlags.EndEllipsis;
+                    Size size = TextRenderer.MeasureText(value, font, new Size(Math.Max(1, bounds.Width - 38), 48), flags);
+                    int height = method ? Math.Min(Math.Max(24, size.Height + 6), bounds.Height - 12) : 24;
+                    Rectangle pill = new Rectangle(bounds.X + 14, bounds.Y + (bounds.Height - height) / 2, Math.Min(size.Width + 10, bounds.Width - 28), height);
                     using (SolidBrush brush = new SolidBrush(update ? Palette.AccentSurface : Palette.Surface)) g.FillRectangle(brush, pill);
                     using (Pen pen = new Pen(update ? Palette.AccentSurface : Palette.Border)) g.DrawRectangle(pen, pill);
-                    TextRenderer.DrawText(g, value, font, pill, color, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    TextRenderer.DrawText(g, value, font, pill, color, flags);
                 }
             }
             else

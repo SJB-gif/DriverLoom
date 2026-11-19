@@ -6,7 +6,7 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
-**Latest source/test version: 0.1.11.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
+**Latest source/test version: 0.1.12.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
 
 ## Code signing policy
 
@@ -23,14 +23,16 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 
 - Installed and available versions, with clear update status.
 - Checks for supported NVIDIA, AMD, Intel, ASUS and Samsung hardware.
-- Group items by the app or manual update method they require, with official web links and copyable details in Settings.
+- Names the software used to update devices that need another app, with official web links.
 - Show or hide items without automatic checks in the hardware list.
 - Windows Update shortcuts in Settings and the diagnostic lists.
 - Dark, light and system themes, plus an optional BIOS/USB preparation guide.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
 
-**Other update methods** groups devices by their update software: for example, CORSAIR peripherals under iCUE, CORSAIR SSDs under SSD Toolbox, and Xbox virtual storage under Microsoft Gaming Services. The page lists each device and links to the official software or support page. A group is not a claim that an update is available. Unknown software owners are not assigned guessed download links.
+Enable **Show items without automatic checks** in Settings to include devices managed by other software or a manual support page. Their status names where to go: for example, **CORSAIR iCUE**, **CORSAIR SSD Toolbox** or **Microsoft Gaming Services**. Use **Open update page** for the official website. These labels do not mean an update is available. Unknown software owners are not assigned guessed download links.
+
+Settings save when you click back onto the main window or press **Esc**. BIOS and firmware options are on the right; background options are on the left.
 
 ## Checks and background operation
 

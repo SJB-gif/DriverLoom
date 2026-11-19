@@ -8,7 +8,7 @@ function Assert-Startup($expected, $actual, [string]$description) {
     if ($actual -cne $expected) { throw "$description expected '$expected', got '$actual'." }
 }
 
-function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '', [Nullable[bool]]$showUnsupported = $null, [hashtable]$lifecycle = @{}) {
+function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '', [Nullable[bool]]$showUnsupported = $null, [hashtable]$lifecycle = @{}, [switch]$SettingsProbe) {
     $env:LOCALAPPDATA = Join-Path $testRoot $name
     $state = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
     [void][IO.Directory]::CreateDirectory($state)
@@ -20,7 +20,10 @@ function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [strin
     if ($snapshot) { Save-Json (Join-Path $state 'inventory.json') $snapshot }
     $outputPath=Join-Path $testRoot ($name+'-output.json')
     $errorPath=Join-Path $testRoot ($name+'-error.txt')
-    $process=Start-Process -FilePath $powerShell -WindowStyle Hidden -ArgumentList @('-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $PSScriptRoot 'Launch.ps1')+'"'),'-SmokeTest') -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -PassThru
+    $originalProbe=$env:DRIVERLOOM_TEST_SETTINGS
+    $env:DRIVERLOOM_TEST_SETTINGS=if($SettingsProbe){'1'}else{''}
+    try{$process=Start-Process -FilePath $powerShell -WindowStyle Hidden -ArgumentList @('-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $PSScriptRoot 'Launch.ps1')+'"'),'-SmokeTest') -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -PassThru}
+    finally{$env:DRIVERLOOM_TEST_SETTINGS=$originalProbe}
     try{
         $null=$process.Handle
         if(!$process.WaitForExit(20000)){$process.Kill();throw "$name startup smoke test timed out."}
@@ -96,10 +99,14 @@ try {
     Assert-Startup $false ($cached.MainDevices -contains 'Standard NVM Express Controller') 'inbox controller absent from results'
     Assert-Startup $false ($cached.MainDevices -contains 'Unsupported test SSD') 'unsupported firmware absent from results'
     Assert-Startup $false $cached.ShowUnsupported 'legacy settings keep unsupported devices hidden'
-    $shown = Invoke-StartupCase 'unsupported-visible' $snapshot $false '' $true
+    $shown = Invoke-StartupCase 'unsupported-visible' $snapshot $false '' $true -SettingsProbe
     Assert-Startup $true $shown.ShowUnsupported 'saved visibility preference loads'
     Assert-Startup 3 $shown.HardwareRows 'unsupported devices can be included without inbox components'
     Assert-Startup $true ($shown.MainDevices -contains 'Unsupported test SSD') 'unsupported device appears when requested'
+    Assert-Startup $true ($shown.MainStatuses -contains 'CORSAIR SSD Toolbox') 'status names the actual update software'
+    Assert-Startup $false ($shown.MainStatuses -contains 'VENDOR APP') 'generic vendor app badge is absent'
+    Assert-Startup $true ($null -ne $shown.SettingsProbe) 'settings interaction probe ran'
+    foreach($property in $shown.SettingsProbe.PSObject.Properties){Assert-Startup $true $property.Value ("settings interaction: "+$property.Name)}
     Assert-Startup $false ($shown.MainDevices -contains 'Standard NVM Express Controller') 'inbox components remain hidden with unsupported devices shown'
     $snapshot.Offers = @()
     $snapshot.WindowsUpdateOfferCount = 2

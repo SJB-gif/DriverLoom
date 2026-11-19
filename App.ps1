@@ -58,6 +58,7 @@ $script:hiddenWindowsCount = 0
 $script:lastScanAttempt = $null
 $script:nextSchedulePoll = [DateTimeOffset]::MinValue
 $script:exitRequested = $false
+$script:settingsWindow = $null
 
 function Restore-Window {
     $form.Show()
@@ -85,6 +86,7 @@ function Invoke-ScheduledCheck {
 function Handle-AppClosing($eventArgs) {
     if($eventArgs.CloseReason -ne [Windows.Forms.CloseReason]::UserClosing){return}
     if($script:installer){$eventArgs.Cancel=$true;$script:exitRequested=$false;return}
+    if(!(Close-SettingsWindow)){$eventArgs.Cancel=$true;return}
     if($script:settings.KeepRunningInTray -and !$script:exitRequested){$eventArgs.Cancel=$true;$form.Hide()}
 }
 
@@ -198,11 +200,13 @@ function Refresh-View {
         }
         $name = if ($row.Kind -eq 'GPU software' -and $row.Part) { $row.Model + ' - ' + $row.Part } else { $row.Model }
         $action = if ($mode -eq 'Unsupported') {if($check.Url){'Open update page'}else{'View details'}} elseif ($check.Status -eq 'Newer at source') { 'Review update' } else { 'Vendor details' }
-        $i = $hardware.Rows.Add(@($name, $row.Current, $check.Available, (Get-DisplayStatus $check.Status), $action))
+        $manager=if($mode -eq 'Unsupported'){$method.Name}else{''}
+        $i = $hardware.Rows.Add(@($name, $row.Current, $check.Available, (Get-DisplayStatus $check.Status $manager), $action))
         $hardware.Rows[$i].Tag = [pscustomobject]@{ Device=$row; Url=$check.Url; Check=$check }
         $hardware.Rows[$i].Cells['Device'].Tag=(Get-HardwareVendor $row)+'  /  '+$row.Kind
         $hardware.Rows[$i].Cells['Device'].ToolTipText=$name
         $hardware.Rows[$i].Cells['Status'].ToolTipText=$check.Status+"`r`n"+$check.Detail
+        if($manager){$hardware.Rows[$i].Cells['Status'].Tag='UpdateMethod'}
         $hardware.Rows[$i].Cells['Source'].Tag='Link'
     }
     $script:unsupportedRows = $unsupported.ToArray()
@@ -268,13 +272,14 @@ function Show-WindowsExclusions([switch]$Preview) {
     try { [void]$dialog.ShowDialog($form) } finally { $dialog.Dispose() }
 }
 
-function New-Dialog([string]$title, [int]$height) {
-    $dialog = New-Object Windows.Forms.Form
+function New-Dialog([string]$title, [int]$height, [switch]$ClickAway) {
+    $dialog = if($ClickAway){[DriverLoom.UI.SettingsWindow]::new()}else{[Windows.Forms.Form]::new()}
     $dialog.Text = $title
     $dialog.Font = $form.Font
     $dialog.StartPosition = 'CenterParent'
     $dialog.ClientSize = New-Object Drawing.Size(665, $height)
-    $dialog.FormBorderStyle = 'FixedDialog'
+    $dialog.FormBorderStyle = if($ClickAway){'None'}else{'FixedDialog'}
+    if($ClickAway){$dialog.ControlBox=$false;$dialog.ShowInTaskbar=$false;$dialog.KeyPreview=$true}
     $dialog.MinimizeBox = $false; $dialog.MaximizeBox = $false
     $dialog.Icon=$form.Icon
     $dialog.AutoScaleMode='Dpi'
@@ -329,7 +334,8 @@ function Edit-Source($selection = $null) {
             if ($pattern) { [void](New-VersionPattern $pattern) }
             $sources += [pscustomobject]@{ Key = $device.Key; Url = $url; Pattern = $pattern }
         }
-        $next = [pscustomobject]@{ Repo = $script:settings.Repo; Bios = $script:settings.Bios; Sources = $sources; Theme=$script:settings.Theme }
+        $next = $script:settings | Select-Object *
+        $next.Sources = $sources
         Save-Json $settingsPath $next
         $script:settings = $next
         if ($script:snapshot) { $script:snapshot.Checks = @($script:snapshot.Checks | Where-Object { $_ -and $_.Key -ne $device.Key }) }
@@ -339,11 +345,40 @@ function Edit-Source($selection = $null) {
     finally { $dialog.Dispose() }
 }
 
+function Save-SettingsWindow($window, [bool]$closingWithOwner=$false) {
+    $controls=$window.Tag
+    $repo=$controls.Repository.Text.Trim()
+    if($repo -and ($repo -notmatch '^[a-z0-9_.-]+/[a-z0-9_.-]+$' -or $repo -match '(^|/)\.{1,2}(/|$)')){
+        if($closingWithOwner){$repo=$script:settings.Repo}else{throw 'Use owner/repository for the optional catalog, or leave it blank.'}
+    }
+    $preference=[string]($controls.Themes|Where-Object Checked|Select-Object -First 1).Tag
+    $next=[pscustomobject]@{Repo=$repo;Bios=$controls.Bios.Checked;Sources=@($script:settings.Sources);Theme=$preference;ShowUnsupported=$controls.ShowUnsupported.Checked;CheckFrequency=[string]$controls.Frequency.SelectedItem;KeepRunningInTray=$controls.Tray.Checked;StartWithWindows=$controls.Startup.Checked}
+    Save-LauncherPreferences $settingsPath $script:settings $next $controls.Launcher
+    if($script:snapshot -and $script:settings.Repo -ne $repo){$script:snapshot.Repository=$null;$script:snapshot.Checks=@()}
+    $script:settings=$next
+    $tray.Visible=$script:settings.KeepRunningInTray
+    $script:nextSchedulePoll=[DateTimeOffset]::MinValue
+    Set-AppTheme $preference $form
+    Refresh-View
+    Update-Controls
+}
+
+function Close-SettingsWindow {
+    $window=$script:settingsWindow
+    if(!$window -or $window.IsDisposed){return $true}
+    $window.Close()
+    return $window.IsDisposed
+}
+
 function Edit-Settings([switch]$Preview) {
-    $dialog = New-Dialog 'Settings | DriverLoom' 688
-    $dialog.ClientSize=[Drawing.Size]::new(940,[Math]::Min(688,([Windows.Forms.Screen]::FromControl($form).WorkingArea.Height-90)))
+    if($script:settingsWindow -and !$script:settingsWindow.IsDisposed){$script:settingsWindow.Activate();return}
+    $dialog = New-Dialog 'Settings | DriverLoom' 740 -ClickAway
+    $height=[Math]::Min(740,[Math]::Min(($form.ClientSize.Height-48),([Windows.Forms.Screen]::FromControl($form).WorkingArea.Height-90)))
+    $dialog.ClientSize=[Drawing.Size]::new(940,$height)
+    $dialog.StartPosition='Manual'
+    $dialog.Location=[Drawing.Point]::new(($form.Left+[Math]::Max(0,($form.Width-$dialog.Width)/2)),($form.Top+[Math]::Max(0,($form.Height-$dialog.Height)/2)))
     Add-DialogHeading $dialog 'Settings' "DRIVERLOOM $script:LauncherVersion  /  MAKE IT YOURS"
-    $body=[Windows.Forms.Panel]::new();$body.SetBounds(0,110,940,($dialog.ClientSize.Height-184));$body.AutoScroll=$true;$body.AutoScrollMinSize=[Drawing.Size]::new(0,616);$dialog.Controls.Add($body)
+    $body=[Windows.Forms.Panel]::new();$body.SetBounds(1,110,938,($dialog.ClientSize.Height-174));$body.AutoScroll=$true;$body.AutoScrollMinSize=[Drawing.Size]::new(0,562);$dialog.Controls.Add($body)
     $appearance=Add-SettingsCard $body 'APPEARANCE' 24 0 432 142
     $appearanceText=[Windows.Forms.Label]::new();$appearanceText.Text='Choose how DriverLoom looks.';$appearanceText.SetBounds(18,48,390,26);$appearance.Controls.Add($appearanceText)
     $themeButtons=@();$themeIndex=0
@@ -359,62 +394,50 @@ function Edit-Settings([switch]$Preview) {
     foreach($choice in 'Manual','On opening','Daily','Weekly'){[void]$frequency.Items.Add($choice)}
     $frequency.SelectedItem=$script:settings.CheckFrequency;$updates.Controls.Add($frequency)
     $updateText=[Windows.Forms.Label]::new();$updateText.Text='Daily and weekly checks run only while DriverLoom is open or in the tray.';$updateText.Tag='Muted';$updateText.SetBounds(18,82,394,40);$updates.Controls.Add($updateText)
-    $windowsUpdate=New-Button 'Open Windows Update';$windowsUpdate.SetBounds(18,130,394,30);$windowsUpdate.Add_Click({Open-WindowsUpdate});$updates.Controls.Add($windowsUpdate)
-    $firmware=Add-SettingsCard $body 'BIOS & FIRMWARE' 24 352 432 142
+    $windowsUpdate=New-Button 'Open Windows Update';$windowsUpdate.SetBounds(18,130,394,30);$windowsUpdate.Add_Click({if(Close-SettingsWindow){Open-WindowsUpdate}});$updates.Controls.Add($windowsUpdate)
+    $firmware=Add-SettingsCard $body 'BIOS & FIRMWARE' 476 210 440 142
     $biosBox = New-Object Windows.Forms.CheckBox
     $biosBox.Text = 'Enable BIOS checks and the USB guide'
     $biosBox.Checked = [bool]$script:settings.Bios
     $biosBox.SetBounds(18,44,394,30);$firmware.Controls.Add($biosBox)
     $biosGuide=New-Button 'Open USB guide';$biosGuide.SetBounds(18,86,178,34);$biosGuide.Enabled=[bool]$script:settings.Bios
-    $biosGuide.Add_Click({Show-BiosGuide});$firmware.Controls.Add($biosGuide)
-    $coverage=Add-SettingsCard $body 'CHECK COVERAGE' 476 0 440 236
-    $coverageText=[Windows.Forms.Label]::new();$coverageText.Text='Windows components stay hidden. Review devices and Windows Update offers that need a manual step.';$coverageText.SetBounds(18,44,404,46);$coverage.Controls.Add($coverageText)
+    $biosGuide.Add_Click({if(Close-SettingsWindow){Show-BiosGuide}});$firmware.Controls.Add($biosGuide)
+    $biosBox.Tag=$biosGuide;$biosBox.Add_CheckedChanged({param($sender,$eventArgs)$sender.Tag.Enabled=$sender.Checked})
+    $coverage=Add-SettingsCard $body 'CHECK COVERAGE' 476 0 440 194
+    $coverageText=[Windows.Forms.Label]::new();$coverageText.Text='Show devices managed by another app or support page. Windows components stay hidden.';$coverageText.SetBounds(18,44,404,46);$coverage.Controls.Add($coverageText)
     $showUnsupported=[Windows.Forms.CheckBox]::new();$showUnsupported.Text='Show items without automatic checks';$showUnsupported.Checked=$script:settings.ShowUnsupported;$showUnsupported.SetBounds(18,94,404,28);$coverage.Controls.Add($showUnsupported)
-    $unsupportedButton=New-Button ("Other update methods ($($script:unsupportedRows.Count) devices)")
-    $unsupportedButton.SetBounds(18,132,404,32);$unsupportedButton.Add_Click({Show-UnsupportedItems})
     $excludedCount=@($script:snapshot.ExcludedOffers|Where-Object{$_}).Count
     $excludedButton=New-Button ("Windows Update exclusions ($excludedCount)")
-    $excludedButton.SetBounds(18,172,404,32);$excludedButton.Add_Click({Show-WindowsExclusions})
-    $coverage.Controls.AddRange(@($unsupportedButton,$excludedButton))
-    $background=Add-SettingsCard $body 'RUNNING IN THE BACKGROUND' 476 252 440 154
+    $excludedButton.SetBounds(18,136,404,32);$excludedButton.Add_Click({if(Close-SettingsWindow){Show-WindowsExclusions}})
+    $coverage.Controls.Add($excludedButton)
+    $background=Add-SettingsCard $body 'RUNNING IN THE BACKGROUND' 24 352 432 154
     $keepInTray=[Windows.Forms.CheckBox]::new();$keepInTray.Text='Keep running in the tray when the window is closed';$keepInTray.Checked=$script:settings.KeepRunningInTray;$keepInTray.SetBounds(18,44,404,28);$background.Controls.Add($keepInTray)
     $startWithWindows=[Windows.Forms.CheckBox]::new();$startWithWindows.Text='Start DriverLoom when I sign in to Windows';$startWithWindows.Checked=$script:settings.StartWithWindows;$startWithWindows.SetBounds(18,78,404,28);$background.Controls.Add($startWithWindows)
     $nativeLauncher=Join-Path $PSScriptRoot 'DriverLoom.exe';$startWithWindows.Enabled=(Test-Path -LiteralPath $nativeLauncher -PathType Leaf) -or $script:settings.StartWithWindows
     $backgroundNote=[Windows.Forms.Label]::new();$backgroundNote.Text=if($startWithWindows.Enabled){'Use the tray menu to open DriverLoom or exit.'}else{'Start with Windows is available after installation.'};$backgroundNote.Tag='Muted';$backgroundNote.SetBounds(18,114,404,26);$background.Controls.Add($backgroundNote)
-    $advanced=Add-SettingsCard $body 'ADVANCED SOURCES' 476 422 440 178
+    $advanced=Add-SettingsCard $body 'ADVANCED SOURCES' 476 368 440 178
     $catalogLabel=[Windows.Forms.Label]::new();$catalogLabel.Text='Optional public GitHub catalog (owner/repository)';$catalogLabel.SetBounds(18,46,404,26);$advanced.Controls.Add($catalogLabel)
     $repoBox=[Windows.Forms.TextBox]::new();$repoBox.Text=$script:settings.Repo;$repoBox.SetBounds(18,78,404,29);$advanced.Controls.Add($repoBox)
-    $editButton=New-Button 'Edit selected device source';$editButton.SetBounds(18,122,404,34);$editButton.Enabled=[bool](Get-SelectedRow);$editButton.Add_Click({Edit-Source});$advanced.Controls.Add($editButton)
-    $save = New-Button 'Save changes';$save.Primary=$true
-    $save.SetBounds(762,($dialog.ClientSize.Height-52),154,36)
-    $save.DialogResult = 'OK'
-    $cancel=New-Button 'Cancel';$cancel.SetBounds(644,($dialog.ClientSize.Height-52),100,36);$cancel.DialogResult='Cancel'
-    $footer=[Windows.Forms.Label]::new();$footer.Text='Your preferences are saved on this PC.';$footer.Tag='Muted';$footer.SetBounds(24,575,590,25)
-    $aboutButton=New-Button 'About';$aboutButton.SetBounds(24,($dialog.ClientSize.Height-52),80,36);$aboutButton.Add_Click({Show-About})
-    $helpButton=New-Button 'Help';$helpButton.SetBounds(116,($dialog.ClientSize.Height-52),80,36);$helpButton.Add_Click({Show-Help})
-    $footer.Visible=$false
-    $dialog.Controls.AddRange(@($save,$cancel,$footer,$aboutButton,$helpButton))
-    $dialog.AcceptButton = $save
-    $dialog.CancelButton=$cancel
-    if($Preview){$dialog.Add_Shown({Save-FormPreview $dialog 'settings';$body.AutoScrollPosition=[Drawing.Point]::new(0,200);Save-FormPreview $dialog 'settings-scrolled';$dialog.Close()})}
-    try {
-        if ($dialog.ShowDialog($form) -ne 'OK') { return }
-        $repo = $repoBox.Text.Trim()
-        if ($repo -and ($repo -notmatch '^[a-z0-9_.-]+/[a-z0-9_.-]+$' -or $repo -match '(^|/)\.{1,2}(/|$)')) { throw 'Use owner/repository.' }
-        $preference=[string]($themeButtons|Where-Object Checked|Select-Object -First 1).Tag
-        $next = [pscustomobject]@{ Repo = $repo; Bios = $biosBox.Checked; Sources = @($script:settings.Sources); Theme=$preference; ShowUnsupported=$showUnsupported.Checked; CheckFrequency=[string]$frequency.SelectedItem; KeepRunningInTray=$keepInTray.Checked; StartWithWindows=$startWithWindows.Checked }
-        Save-LauncherPreferences $settingsPath $script:settings $next $nativeLauncher
-        if ($script:snapshot -and $script:settings.Repo -ne $repo) {
-            $script:snapshot.Repository = $null
-            $script:snapshot.Checks = @()
+    $editButton=New-Button 'Edit selected device source';$editButton.SetBounds(18,122,404,34);$editButton.Enabled=[bool](Get-SelectedRow);$editButton.Add_Click({$selected=Get-SelectedRow;if(Close-SettingsWindow){Edit-Source $selected}});$advanced.Controls.Add($editButton)
+    $aboutButton=New-Button 'About';$aboutButton.SetBounds(24,($dialog.ClientSize.Height-50),80,34);$aboutButton.Add_Click({if(Close-SettingsWindow){Show-About}})
+    $helpButton=New-Button 'Help';$helpButton.SetBounds(116,($dialog.ClientSize.Height-50),80,34);$helpButton.Add_Click({if(Close-SettingsWindow){Show-Help}})
+    $footer=[Windows.Forms.Label]::new();$footer.Text='Click on the main window to save and return. Esc also works.';$footer.Tag='Muted';$footer.SetBounds(216,($dialog.ClientSize.Height-50),700,36);$footer.TextAlign='MiddleLeft'
+    $dialog.Controls.AddRange(@($footer,$aboutButton,$helpButton))
+    $dialog.Tag=[pscustomobject]@{Preview=[bool]$Preview;Body=$body;Themes=$themeButtons;Repository=$repoBox;Bios=$biosBox;ShowUnsupported=$showUnsupported;Frequency=$frequency;Tray=$keepInTray;Startup=$startWithWindows;Launcher=$nativeLauncher;Feedback=$footer;FirmwareCard=$firmware;BackgroundCard=$background;CoverageCard=$coverage}
+    $dialog.Add_FormClosing({param($sender,$eventArgs)
+        if($sender.Tag.Preview){return}
+        try{Save-SettingsWindow $sender ($eventArgs.CloseReason -ne [Windows.Forms.CloseReason]::UserClosing)}
+        catch{
+            if($eventArgs.CloseReason -eq [Windows.Forms.CloseReason]::UserClosing){
+                $eventArgs.Cancel=$true;$sender.Tag.Feedback.Text=$_.Exception.Message;$sender.Tag.Feedback.ForeColor=[Drawing.Color]::IndianRed
+                $sender.Tag.Repository.Focus()|Out-Null
+            }
         }
-        $script:settings = $next
-        $tray.Visible=$script:settings.KeepRunningInTray
-        $script:nextSchedulePoll=[DateTimeOffset]::MinValue
-        Set-AppTheme $preference $form
-        Refresh-View
-        $status.Text = 'Settings saved.'
-    } catch { Show-Message $_.Exception.Message } finally { $dialog.Dispose() }
+    })
+    $dialog.Add_FormClosed({param($sender,$eventArgs)$script:settingsWindow=$null;$sender.Dispose()})
+    if($Preview){$dialog.Add_Shown({param($sender,$eventArgs)Save-FormPreview $sender 'settings';$sender.Tag.Body.AutoScrollPosition=[Drawing.Point]::new(0,200);Save-FormPreview $sender 'settings-scrolled';$sender.Close()})}
+    $script:settingsWindow=$dialog
+    $dialog.Show($form)
 }
 
 function Get-UsbVolumes {
@@ -727,6 +750,8 @@ $form.Add_Shown({
             BackgroundStartsHidden = $false
             WindowsManagedHidden = $script:hiddenWindowsCount
             MainDevices = @($hardware.Rows | ForEach-Object { $_.Cells[0].Value })
+            MainStatuses = @($hardware.Rows | ForEach-Object { $_.Cells['Status'].Value })
+            SettingsProbe = $null
             MainButtonCount = 1
             MainActionText = $primary.Text
             MainActionUsesMnemonic = $primary.UseMnemonic
@@ -756,6 +781,34 @@ $form.Add_Shown({
             FreshActionVisible = $false
             FreshActionEnabled = $false
             FreshUpdateAllEnabled = $false
+        }
+        if($env:DRIVERLOOM_TEST_SETTINGS -eq '1'){
+            $originalVisibility=$script:settings.ShowUnsupported
+            Edit-Settings
+            $window=$script:settingsWindow
+            $modeless=$form.Enabled -and !$window.Modal -and $window.Owner -eq $form
+            $noClose=$window.FormBorderStyle -eq 'None' -and !$window.ControlBox -and !$window.AcceptButton -and !$window.CancelButton
+            $noOtherMethods=@($window.Tag.CoverageCard.Controls|Where-Object Text -like 'Other update methods*').Count -eq 0
+            $swapped=$window.Tag.BackgroundCard.Left -lt $window.Tag.FirmwareCard.Left
+            $inside=[Windows.Forms.Message]::Create($window.Tag.Repository.Handle,0x0201,[IntPtr]::Zero,[IntPtr]::Zero)
+            $insideIgnored=!$window.PreFilterMessage([ref]$inside) -and !$window.IsDisposed
+            $window.Tag.ShowUnsupported.Checked=!$originalVisibility
+            $window.Tag.Repository.Text='invalid/catalog/path'
+            $outside=[Windows.Forms.Message]::Create($refresh.Handle,0x0201,[IntPtr]::Zero,[IntPtr]::Zero)
+            $blocked=$window.PreFilterMessage([ref]$outside) -and !$window.IsDisposed -and $script:settings.ShowUnsupported -eq $originalVisibility
+            $window.Tag.Repository.Text=$script:settings.Repo
+            $consumed=$window.PreFilterMessage([ref]$outside)
+            $dismissed=$window.IsDisposed
+            $saved=Get-Content -LiteralPath $settingsPath -Raw|ConvertFrom-Json
+            $persisted=$saved.ShowUnsupported -eq !$originalVisibility
+            Edit-Settings
+            $reopened=$script:settingsWindow
+            $reloaded=$reopened.Tag.ShowUnsupported.Checked -eq !$originalVisibility
+            $reopened.Tag.ShowUnsupported.Checked=$originalVisibility
+            $escape=[Windows.Forms.KeyEventArgs]::new([Windows.Forms.Keys]::Escape)
+            $keyHandler=$reopened.GetType().GetMethod('OnKeyDown',[Reflection.BindingFlags]'Instance,NonPublic')
+            $null=$keyHandler.Invoke($reopened,@($escape))
+            $script:smokeResult.SettingsProbe=[pscustomobject]@{Modeless=$modeless;NoCloseButtons=$noClose;NoOtherMethodsButton=$noOtherMethods;CardsSwapped=$swapped;InsideClickIgnored=$insideIgnored;InvalidCatalogBlocksDismiss=$blocked;OutsideClickConsumed=$consumed;OutsideClickDismisses=$dismissed;PreferencesPersist=$persisted;ReopenLoadsPreferences=$reloaded;EscapeDismisses=$reopened.IsDisposed -and $escape.Handled}
         }
         $script:fresh = $true
         Update-Controls
