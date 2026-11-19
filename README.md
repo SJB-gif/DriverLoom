@@ -2,6 +2,8 @@
 
 An MIT-licensed Windows 10/11 x64 prototype for recording hardware, checking saved manufacturer sources and applying eligible Windows Update drivers.
 
+Current source: **0.1.2**, prepared locally for repository review. See [Windows verification](docs/VERIFICATION.md) and the [release draft](docs/RELEASE_NOTES_0.1.2.md).
+
 ## Run it
 
 Open `HardwareUpdateLauncher-Setup.exe`. Setup installs for the current user and creates a **Hardware Update Launcher** Start menu shortcut and an uninstall entry. The installer is unsigned. The launcher uses Windows PowerShell 5.1 with a process-scoped execution policy setting. Machine policy takes precedence. A startup failure inside the launcher produces a dialog and usually writes `%LOCALAPPDATA%\HardwareUpdateLauncher\startup-error.log`.
@@ -22,7 +24,7 @@ The inventory and saved links live in `%LOCALAPPDATA%\HardwareUpdateLauncher\inv
 
 ## GitHub catalog and builds
 
-The source has a GitHub Actions workflow that tests the PowerShell and builds a Windows x64 installer. Put the source in a public GitHub repository and enter its `owner/repository` in **Settings**. On each check the app reads the latest release tag and `catalog.json` from the repository's `main` branch. It displays the release and provides a link to the release page. The catalog is data. The app does not download or execute scripts or installer binaries from the repository.
+The source has a GitHub Actions workflow that tests the PowerShell and builds a Windows x64 installer. Confirm the destination owner/repository, whether it already exists, and its visibility before pushing. The optional catalog setting uses unauthenticated reads and requires a public repository; enter that public `owner/repository` in **Settings** if desired. On each check the app reads the latest release tag and `catalog.json` from the repository's `main` branch. It displays the release and provides a link to the release page. The catalog is data. The app does not download or execute scripts or installer binaries from the repository.
 
 Add reviewed entries to the `sources` array in `catalog.json` with this shape. Use the exact values from the local inventory and escape backslashes for JSON.
 
@@ -43,12 +45,23 @@ Add reviewed entries to the `sources` array in `catalog.json` with this shape. U
 
 Catalog entries require exact device fields, a single matching source and a URL on the recognised manufacturer domain. BIOS, chipset and GPU entries additionally match the system manufacturer, model and SKU, where available. Local overrides take precedence. Save the final URL if a support page redirects. If a pattern returns several distinct versions, make it specific to the current listing.
 
-To build an installer from source, use NSIS 3.11 or later:
+To build from source, install stock NSIS 3.11 or later, then use **64-bit Windows PowerShell 5.1**:
 
-```bat
-makensis Setup.nsi
-powershell -NoProfile -File Test-Engine.ps1
+```powershell
+.\Build.ps1 -MakeNSIS 'C:\Program Files (x86)\NSIS\makensis.exe'
 ```
+
+This runs the engine and Windows Forms startup checks, then writes `dist\HardwareUpdateLauncher-Setup.exe` and its SHA-256 sidecar. End users need only the installer EXE. The setup program uses NSIS's bundled x86 Unicode stub, accepts only native x64 Windows 10/11, and explicitly starts 64-bit Windows PowerShell. The finish-page command uses `Sysnative` from the 32-bit setup process; the Start menu shortcut uses `System32` from the Windows shell.
+
+Run the following on a clean test user or disposable Windows machine to verify the installer:
+
+```powershell
+.\Test-Installer.ps1
+```
+
+This temporarily creates the actual per-user Start menu shortcut and uninstall registration, installs into a temporary path with spaces, verifies launch paths and payload hashes, and uninstalls. It refuses to replace an existing installation. Its startup tests use isolated settings; driver installation, reboot and BIOS flashing are not exercised. `Launch.ps1 -SmokeTest` opens and closes the real form without starting a hardware or network scan.
+
+The Actions workflow runs the same build and installer checks and uploads the EXE plus checksum as a workflow artifact. It has read-only repository permissions and does not publish a release. A GitHub Actions run and an interactive finish-page check remain required before release approval.
 
 ## References
 

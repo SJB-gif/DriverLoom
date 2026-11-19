@@ -1,3 +1,5 @@
+param([switch]$SmokeTest)
+
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
@@ -441,6 +443,21 @@ $timer.Add_Tick({
     }
 })
 $form.Add_Shown({
+    if ($SmokeTest) {
+        $script:smokeResult = [pscustomobject]@{
+            Version = $script:LauncherVersion
+            Visible = $form.Visible
+            HardwareRows = $hardware.Rows.Count
+            DriverRows = $drivers.Rows.Count
+            BiosEnabled = $bios.Enabled
+            UpdateAllEnabled = $install.Enabled
+            Is64BitProcess = [Environment]::Is64BitProcess
+            ApartmentState = [string][Threading.Thread]::CurrentThread.GetApartmentState()
+            ScanStarted = $null -ne $script:job
+        }
+        $form.Close()
+        return
+    }
     $timer.Start()
     Start-Scan
 })
@@ -452,6 +469,7 @@ try {
     Refresh-View
     Update-Controls
     [void]$form.ShowDialog()
+    if ($SmokeTest) { $script:smokeResult | ConvertTo-Json -Compress }
 } finally {
     $timer.Stop()
     if ($script:job) { Remove-Job -Job $script:job -Force }

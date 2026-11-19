@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-foreach ($name in 'App.ps1', 'Engine.ps1', 'Install.ps1', 'Launch.ps1', 'Test-Engine.ps1') {
+foreach ($name in (Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -File).Name) {
     $tokens = $null
     $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name), [ref]$tokens, [ref]$errors)

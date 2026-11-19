@@ -1,3 +1,10 @@
 *.exe
 *.obj
 *.zip
+*.log
+*.tmp
+.local/
+dist/
+inventory.json
+settings.json
+startup-error.log

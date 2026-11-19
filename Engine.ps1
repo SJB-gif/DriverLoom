@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.1'
+$script:LauncherVersion = '0.1.2'
 
 function Save-Json($path, $data) {
     $temp = "$path.$([guid]::NewGuid().ToString('N')).tmp"
@@ -129,7 +129,7 @@ function Get-HttpsUri([string]$value) {
 function Read-WebSource([string]$url, [int]$limit = 2097152) {
     $uri = Get-HttpsUri $url
     $request = [Net.HttpWebRequest]::Create($uri)
-    $request.UserAgent = 'HardwareUpdateLauncher/0.1.1'
+    $request.UserAgent = 'HardwareUpdateLauncher/0.1.2'
     $request.AllowAutoRedirect = $false
     $request.Timeout = 12000
     $request.ReadWriteTimeout = 12000
