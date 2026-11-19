@@ -1,10 +1,12 @@
 # Windows verification - 19 November 2026
 
+> Historical verification for the 0.1.2 test build. Repository and publication statements below describe that stage; see the [README](../README.md) for the current DriverLoom release and build instructions.
+
 ## Scope and provenance
 
 The user requested extraction, diagnosis of the Windows launch failure, verification of the single-file installer, and source preparation for GitHub. Repository confirmation is required before any push or release. Future vendor-driver work in `CODEX_HANDOFF.md` is background, not authorization to implement it.
 
-The ZIP was extracted outside the unrelated TravelMate checkout. Its original source is preserved in commit `f6bdd3c`; the repair is commit `b542c79` on `codex/windows-launch-installer`. The prepared history was subsequently imported into the Windows Driver Updater workspace on `main`. The user explicitly authorized a new public repository, [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/HardwareUpdateLauncher), and a source push on 19 November 2026. Releases remain unpublished at the user's request. `CODEX_HANDOFF.md` describes the earlier 0.1.1 state; this report describes the 0.1.2 repair.
+The ZIP was extracted outside the unrelated TravelMate checkout. Its original source is preserved in commit `f6bdd3c`; the repair is commit `b542c79` on `codex/windows-launch-installer`. The prepared history was subsequently imported into the Windows Driver Updater workspace on `main`. The user explicitly authorized a new public repository, [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/DriverLoom), and a source push on 19 November 2026. Releases remain unpublished at the user's request. `CODEX_HANDOFF.md` describes the earlier 0.1.1 state; this report describes the 0.1.2 repair.
 
 ## Diagnosis
 

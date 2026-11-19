@@ -5,8 +5,9 @@ if (![Environment]::Is64BitProcess) { throw 'Run installer checks from 64-bit Wi
 if (!(Test-Path -LiteralPath $InstallerPath)) { throw 'Build the installer first.' }
 $regPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher'
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'DriverLoom.lnk'
+$desktopShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'DriverLoom.lnk'
 $legacyShortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'Hardware Update Launcher.lnk'
-if ((Test-Path -LiteralPath $regPath) -or (Test-Path -LiteralPath $shortcutPath) -or (Test-Path -LiteralPath $legacyShortcutPath)) {
+if ((Test-Path -LiteralPath $regPath) -or (Test-Path -LiteralPath $shortcutPath) -or (Test-Path -LiteralPath $legacyShortcutPath) -or (Test-Path -LiteralPath $desktopShortcutPath)) {
     throw 'Installer checks require no existing DriverLoom or Hardware Update Launcher installation. Use a disposable Windows user or clean test machine.'
 }
 $mutex = $null
@@ -48,12 +49,43 @@ function Invoke-TestUninstall {
         Wait-TestProcess $process
     }
     $deadline = [datetime]::UtcNow.AddSeconds(20)
-    while (((Test-Path -LiteralPath $regPath) -or (Test-Path -LiteralPath $shortcutPath) -or (Test-Path -LiteralPath $installRoot)) -and [datetime]::UtcNow -lt $deadline) {
+    while (((Test-Path -LiteralPath $regPath) -or (Test-Path -LiteralPath $shortcutPath) -or (Test-Path -LiteralPath $desktopShortcutPath) -or (Test-Path -LiteralPath $installRoot)) -and [datetime]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 200
     }
     Assert-Installer $false (Test-Path -LiteralPath $regPath) 'uninstall registration removed'
     Assert-Installer $false (Test-Path -LiteralPath $shortcutPath) 'Start menu shortcut removed'
+    Assert-Installer $false (Test-Path -LiteralPath $desktopShortcutPath) 'desktop shortcut removed'
     Assert-Installer $false (Test-Path -LiteralPath $installRoot) 'program payload removed'
+}
+
+function Assert-Shortcut([string]$path,[string]$label) {
+    $shell=New-Object -ComObject WScript.Shell
+    $shortcut=$shell.CreateShortcut($path)
+    try{
+        Assert-Installer (Join-Path $installRoot 'DriverLoom.exe') $shortcut.TargetPath "$label native target"
+        Assert-Installer ((Join-Path $installRoot 'assets\DriverLoom-loops.ico')+',0') $shortcut.IconLocation "$label icon"
+        Assert-Installer '' $shortcut.Arguments "$label arguments"
+    }finally{[void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut);[void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)}
+    Assert-Installer 'SJB.DriverLoom' (Invoke-InstalledHost @('--read-shortcut-id',('"'+$path+'"'))) "$label taskbar identity"
+}
+
+function Test-ShortcutChoice([string]$name,[bool]$startMenu,[bool]$desktop,[switch]$Upgrade) {
+    $script:installationStarted=$true
+    $arguments=@('/S',('/STARTMENU='+[int]$startMenu),('/DESKTOP='+[int]$desktop),('/D='+$installRoot))
+    $process=Start-Process -FilePath $InstallerPath -WindowStyle Hidden -ArgumentList $arguments -PassThru
+    Wait-TestProcess $process
+    Assert-Installer $startMenu (Test-Path -LiteralPath $shortcutPath) "$name Start menu choice"
+    Assert-Installer $desktop (Test-Path -LiteralPath $desktopShortcutPath) "$name desktop choice"
+    if($startMenu){Assert-Shortcut $shortcutPath "$name Start menu"}
+    if($desktop){Assert-Shortcut $desktopShortcutPath "$name desktop"}
+    if($Upgrade){
+        $process=Start-Process -FilePath $InstallerPath -WindowStyle Hidden -ArgumentList @('/S',('/D='+$installRoot)) -PassThru
+        Wait-TestProcess $process
+        Assert-Installer $startMenu (Test-Path -LiteralPath $shortcutPath) "$name upgrade retains Start menu choice"
+        Assert-Installer $desktop (Test-Path -LiteralPath $desktopShortcutPath) "$name upgrade retains desktop choice"
+    }
+    Invoke-TestUninstall
+    $script:installationStarted=$false
 }
 
 try {
@@ -74,6 +106,7 @@ try {
     $installationStarted = $true
     $setup = Start-Process -FilePath $InstallerPath -WindowStyle Hidden -ArgumentList @('/S', ('/D=' + $installRoot)) -PassThru
     Wait-TestProcess $setup
+    Assert-Installer $false (Test-Path -LiteralPath $desktopShortcutPath) 'desktop shortcut is optional by default'
     $registration = Get-ItemProperty -LiteralPath $regPath
     Assert-Installer 'DriverLoom' $registration.DisplayName 'branded installed application name'
     Assert-Installer $false (Test-Path -LiteralPath $legacyShortcutPath) 'legacy shortcut replaced during upgrade'
@@ -131,8 +164,11 @@ try {
     }
     Invoke-TestUninstall
     $installationStarted = $false
+    Test-ShortcutChoice 'desktop-only' $false $true -Upgrade
+    Test-ShortcutChoice 'both' $true $true
+    Test-ShortcutChoice 'neither' $false $false
     Assert-Installer $settingsHash (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash 'uninstall preserves saved user settings'
-    Write-Output 'Windows installer checks passed: silent install, source payload hashes, HKCU registration, 64-bit finish command, Start menu launch and relaunch, uninstall and settings retention.'
+    Write-Output 'Windows installer checks passed: all shortcut choices and upgrade persistence, native icon/AppID, payload hashes, registration, both launch paths, uninstall and settings retention.'
 } finally {
     if ($launchProcess -and !$launchProcess.HasExited) { Stop-Process -Id $launchProcess.Id; [void]$launchProcess.WaitForExit(10000) }
     if ($installationStarted) { Invoke-TestUninstall }

@@ -1,6 +1,6 @@
 # Hardware Update Launcher 0.1.2 - release draft
 
-Prepared on 19 November 2026. The public source repository is [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/HardwareUpdateLauncher). This release remains a draft; no tag or release has been published.
+Prepared on 19 November 2026. The public source repository is [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/DriverLoom). This release remains a draft; no tag or release has been published.
 
 Windows setup now builds with stock NSIS 3.11. The previous source requested an amd64 stub missing from the standard Windows compiler package. Setup uses the bundled Unicode stub, rejects unsupported OS architectures and explicitly launches 64-bit Windows PowerShell. The installer remains a single `HardwareUpdateLauncher-Setup.exe` for Windows 10/11 x64.
 

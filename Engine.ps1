@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.7'
+$script:LauncherVersion = '0.1.8'
 . (Join-Path $PSScriptRoot 'Coverage.ps1')
 . (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 
@@ -151,7 +151,7 @@ function Get-HttpsUri([string]$value) {
 function Read-WebSource([string]$url, [int]$limit = 2097152) {
     $uri = Get-HttpsUri $url
     $request = [Net.HttpWebRequest]::Create($uri)
-    $request.UserAgent = 'DriverLoom/0.1.7'
+    $request.UserAgent = 'DriverLoom/0.1.8'
     $request.AllowAutoRedirect = $false
     $request.Timeout = 12000
     $request.ReadWriteTimeout = 12000
@@ -197,6 +197,7 @@ function Compare-ReportedVersion([string]$installed, [string]$available) {
 
 function Get-RepositoryCatalog([string]$repo, $warnings) {
     if (!$repo) { return $null }
+    if ($repo -eq 'SJB-gif/HardwareUpdateLauncher') { $repo = 'SJB-gif/DriverLoom' }
     $result = [pscustomobject]@{ Release = ''; ReleaseUrl = "https://github.com/$repo/releases"; Sources = @() }
     if ($repo -notmatch '^[a-z0-9_.-]+/[a-z0-9_.-]+$' -or $repo -match '(^|/)\.{1,2}(/|$)') {
         $warnings.Add('GitHub configuration requires an owner/repository name.')

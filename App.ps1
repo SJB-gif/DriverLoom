@@ -558,7 +558,7 @@ $footer.Add_Paint({param($sender,$eventArgs)$pen=[Drawing.Pen]::new([DriverLoom.
 $form.Controls.Add($footer);$form.Controls.Add($header)
 $primary.Add_Click({Show-UpdateReview})
 $refresh.Add_Click({Start-Scan})
-$repoButton.Add_Click({Open-Link 'https://github.com/SJB-gif/HardwareUpdateLauncher'})
+$repoButton.Add_Click({Open-Link 'https://github.com/SJB-gif/DriverLoom'})
 $settingsMenu.Add_Click({Edit-Settings;Update-Controls})
 $hardware.Add_CellContentClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -ge 0 -and $sender.Columns[$eventArgs.ColumnIndex].Name -eq 'Source'){$selected=$sender.Rows[$eventArgs.RowIndex].Tag;if($selected.Url){Open-Link $selected.Url}}})
 $hardware.Add_CellDoubleClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -ne $hardware.Columns['Source'].Index){Show-DeviceDetails}})

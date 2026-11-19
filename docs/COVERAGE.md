@@ -1,6 +1,6 @@
 # Coverage and source rules
 
-Hardware Update Launcher targets Windows 10/11 x64 across different PCs. It does not claim that every manufacturer's device has a public, automatically comparable update feed.
+DriverLoom targets Windows 10/11 x64 across different PCs. It does not claim that every manufacturer's device has a public, automatically comparable update feed.
 
 | Family | Automatic check | Matching rule |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Hardware Update Launcher targets Windows 10/11 x64 across different PCs. It does
 
 Generic Windows components are removed from the main results and unsupported count. Classification uses provider and published INF identity, with name-based compatibility for older saved scans. Microsoft-signed `oemNN.inf` packages remain eligible for manufacturer checking; signing alone does not mean a Windows inbox component. CPU, RAM and system identity remain available through About and internal matching.
 
-Direct version comparison, package information, manual vendor installation and automatic installation are separate capabilities. A successful manufacturer check does not authorise automatically executing its package. The combined button currently installs eligible Windows Update offers only, following an explicit confirmation, administrator approval and offer revalidation. Manufacturer packages requiring manual installation have Review update links.
+Direct version comparison, package information, manual vendor installation and automatic installation are separate capabilities. A successful manufacturer check does not authorise automatically executing its package. Update All opens a review list; eligible Windows Update offers can then be installed following confirmation, administrator approval and offer revalidation. Manufacturer packages requiring manual installation have Review update links.
 
 Sources can change or block automation. Failed source reads, missing exact matches, conflicting versions and vendor-only utilities remain in Settings > Unsupported items. They are not silently omitted from coverage or counted as current. No serial number is sent to a manufacturer to resolve an unsupported item.
 

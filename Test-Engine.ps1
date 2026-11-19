@@ -24,6 +24,8 @@ function Read-WebSource([string]$url, [int]$limit = 2097152) {
             return '<div>NVMe SSD-990 PRO Series Firmware</div><span>ISO 8B2QJXD7 | 50MB Download</span><div>NVMe SSD-990 EVO Plus Firmware</div><span>ISO 2B2QKXG7 | 32MB Download</span><p>previous 7B2QJXD7</p>'
         }
         'https://api.github.com/repos/example/source/releases/latest' { return '{"tag_name":"v0.1.0"}' }
+        'https://api.github.com/repos/SJB-gif/DriverLoom/releases/latest' { return '{"tag_name":"v0.1.8"}' }
+        'https://raw.githubusercontent.com/SJB-gif/DriverLoom/main/catalog.json' { return '{"schema":1,"sources":[]}' }
         'https://raw.githubusercontent.com/example/source/main/catalog.json' {
             return '{"schema":1,"sources":[{"Key":"spoofed","Kind":"GPU driver","Manufacturer":"NVIDIA","Model":"Example","Part":"PCI TEST","Revision":"","SystemManufacturer":"Dell","SystemModel":"Example system","SystemPart":"A","Url":"https://unknown.com/driver","Pattern":"(?<version>\\d+)"}]}'
         }
@@ -111,4 +113,9 @@ $actionSnapshot.WindowsUpdateOK=$false
 Assert-Equal $false (Get-UpdateAction $actionSnapshot $true $false).Visible 'failed Windows scan cannot offer an installation'
 Assert-Equal 'CHECKED 2 MIN AGO' (Get-CheckCaption '2026-11-19T13:00:00+11:00' ([datetimeoffset]'2026-11-19T02:02:12Z')) 'footer age handles local timezone'
 Assert-Equal 'NOT CHECKED YET' (Get-CheckCaption 'invalid') 'invalid date never claims a recent check'
+$renameWarnings=[System.Collections.Generic.List[string]]::new()
+$renamedCatalog=Get-RepositoryCatalog 'SJB-gif/HardwareUpdateLauncher' $renameWarnings
+Assert-Equal 'https://github.com/SJB-gif/DriverLoom/releases' $renamedCatalog.ReleaseUrl 'renamed repository canonical link'
+Assert-Equal 'v0.1.8' $renamedCatalog.Release 'old catalog setting follows renamed repository'
+Assert-Equal 0 $renameWarnings.Count 'renamed catalog uses final URLs without redirects'
 Write-Output 'PowerShell parsed and engine checks passed.'
