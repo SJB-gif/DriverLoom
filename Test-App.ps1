@@ -8,12 +8,13 @@ function Assert-Startup($expected, $actual, [string]$description) {
     if ($actual -cne $expected) { throw "$description expected '$expected', got '$actual'." }
 }
 
-function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '') {
+function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '', [Nullable[bool]]$showUnsupported = $null) {
     $env:LOCALAPPDATA = Join-Path $testRoot $name
     $state = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
     [void][IO.Directory]::CreateDirectory($state)
     $preferences=@{ Repo = ''; Bios = $biosEnabled; Sources = @() }
     if($theme){$preferences.Theme=$theme}
+    if($null -ne $showUnsupported){$preferences.ShowUnsupported=$showUnsupported}
     Save-Json (Join-Path $state 'settings.json') $preferences
     if ($snapshot) { Save-Json (Join-Path $state 'inventory.json') $snapshot }
     $output = & $powerShell -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Launch.ps1') -SmokeTest
@@ -74,7 +75,12 @@ try {
     Assert-Startup 1 $cached.WindowsManagedHidden 'Windows-managed controller removed from main results'
     Assert-Startup $false ($cached.MainDevices -contains 'Standard NVM Express Controller') 'inbox controller absent from results'
     Assert-Startup $false ($cached.MainDevices -contains 'Unsupported test SSD') 'unsupported firmware absent from results'
-    Assert-Startup $true ($cached.Summary -like '*1 Windows Update package(s) ready*') 'summary distinguishes installable packages'
+    Assert-Startup $false $cached.ShowUnsupported 'legacy settings keep unsupported devices hidden'
+    $shown = Invoke-StartupCase 'unsupported-visible' $snapshot $false '' $true
+    Assert-Startup $true $shown.ShowUnsupported 'saved visibility preference loads'
+    Assert-Startup 3 $shown.HardwareRows 'unsupported devices can be included without inbox components'
+    Assert-Startup $true ($shown.MainDevices -contains 'Unsupported test SSD') 'unsupported device appears when requested'
+    Assert-Startup $false ($shown.MainDevices -contains 'Standard NVM Express Controller') 'inbox components remain hidden with unsupported devices shown'
     $snapshot.Offers = @()
     $snapshot.WindowsUpdateOfferCount = 2
     $excludedOnly = Invoke-StartupCase 'excluded-only' $snapshot $false
@@ -82,6 +88,10 @@ try {
     Assert-Startup $false $excludedOnly.UpdateAllEnabled 'excluded offers never enable Update All'
     Assert-Startup $false $excludedOnly.FreshUpdateAllEnabled 'fresh excluded-only scan cannot enable Update All'
     Assert-Startup $true $excludedOnly.FreshActionVisible 'manufacturer-only updates still have a review action'
+    $unsupportedSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($snapshot.Inventory[3]);Checks=@();Offers=@();ExcludedOffers=@();Warnings=@()}
+    $unsupportedOnly=Invoke-StartupCase 'unsupported-only' $unsupportedSnapshot $false '' $true
+    Assert-Startup 1 $unsupportedOnly.HardwareRows 'unsupported-only inventory remains inspectable'
+    Assert-Startup $false $unsupportedOnly.FreshActionVisible 'showing unsupported devices never creates an update offer'
     $optIn = Invoke-StartupCase 'bios-opt-in' $snapshot $true
     Assert-Startup 1 $optIn.HardwareRows 'unsupported BIOS does not add an unchecked row to main results'
     $light = Invoke-StartupCase 'light-theme' $snapshot $false 'Light'

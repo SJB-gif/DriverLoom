@@ -17,7 +17,8 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 
 - Installed and available versions, with clear update status.
 - Checks for supported NVIDIA, AMD, Intel, ASUS and Samsung hardware.
-- Unsupported devices and excluded offers explained in Settings.
+- Show or hide unsupported devices in Settings, with reasons and excluded offers available to copy.
+- Windows Update shortcuts in Settings and the diagnostic lists.
 - Dark, light and system themes, plus an optional BIOS/USB preparation guide.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
@@ -31,6 +32,7 @@ Automatic installation supports eligible **Windows Update drivers only**. Manufa
 DriverLoom requires no account and contains no analytics, advertising or usage tracking.
 
 - **Local data:** hardware inventory, preferences, saved sources and diagnostic logs are stored on your PC in `%LOCALAPPDATA%\HardwareUpdateLauncher`. DriverLoom does not automatically upload these files.
+- **Copy list:** copies the displayed device or package names and reasons to the Windows clipboard when you select it.
 - **Update checks:** opening the app starts checks with Windows Update and manufacturer sites. Some manufacturer lookups include hardware-model and Windows-version details.
 - **Optional GitHub access:** catalog and release metadata are fetched only if you configure a repository. Opening a vendor or repository link visits that site in your browser.
 

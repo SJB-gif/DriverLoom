@@ -13,6 +13,7 @@ function Get-DisplayStatus([string]$status) {
         'Newer at source' { 'UPDATE AVAILABLE' }
         'Current at source' { 'UP TO DATE' }
         'Installed version is higher' { 'INSTALLED IS NEWER' }
+        'Unsupported' { 'UNSUPPORTED' }
         default { 'PACKAGE DETAILS' }
     }
 }
