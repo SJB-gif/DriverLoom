@@ -1,0 +1,30 @@
+name: Build Windows installer
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate PowerShell
+        shell: powershell
+        run: .\Test-Engine.ps1
+      - name: Build x64 installer
+        shell: powershell
+        run: |
+          choco install nsis --version=3.11 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed.' }
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          & $makensis /V3 Setup.nsi
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HardwareUpdateLauncher-Setup
+          path: HardwareUpdateLauncher-Setup.exe
