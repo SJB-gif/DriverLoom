@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.9'
+$script:LauncherVersion = '0.1.10'
 . (Join-Path $PSScriptRoot 'Coverage.ps1')
 . (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 
@@ -151,7 +151,7 @@ function Get-HttpsUri([string]$value) {
 function Read-WebSource([string]$url, [int]$limit = 2097152) {
     $uri = Get-HttpsUri $url
     $request = [Net.HttpWebRequest]::Create($uri)
-    $request.UserAgent = 'DriverLoom/0.1.9'
+    $request.UserAgent = 'DriverLoom/0.1.10'
     $request.AllowAutoRedirect = $false
     $request.Timeout = 12000
     $request.ReadWriteTimeout = 12000

@@ -1,6 +1,7 @@
 param([string]$InstallerPath = (Join-Path $PSScriptRoot 'dist\DriverLoom-Setup.exe'))
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Engine.ps1')
+. (Join-Path $PSScriptRoot 'Lifecycle.ps1')
 if (![Environment]::Is64BitProcess) { throw 'Run installer checks from 64-bit Windows PowerShell.' }
 if (!(Test-Path -LiteralPath $InstallerPath)) { throw 'Build the installer first.' }
 $regPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher'
@@ -9,6 +10,9 @@ $desktopShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Driv
 $legacyShortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'Hardware Update Launcher.lnk'
 if ((Test-Path -LiteralPath $regPath) -or (Test-Path -LiteralPath $shortcutPath) -or (Test-Path -LiteralPath $legacyShortcutPath) -or (Test-Path -LiteralPath $desktopShortcutPath)) {
     throw 'Installer checks require no existing DriverLoom or Hardware Update Launcher installation. Use a disposable Windows user or clean test machine.'
+}
+if([Microsoft.Win32.Registry]::GetValue('HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run','DriverLoom',$null)){
+    throw 'Installer checks require no existing DriverLoom startup entry. Use a clean test machine.'
 }
 $mutex = $null
 if ([Threading.Mutex]::TryOpenExisting('Local\HardwareUpdateLauncher', [ref]$mutex)) {
@@ -45,6 +49,7 @@ function Invoke-InstalledHost([string[]]$arguments) {
 function Invoke-TestUninstall {
     $uninstaller = Join-Path $installRoot 'Uninstall.exe'
     if (Test-Path -LiteralPath $uninstaller) {
+        Set-StartupRegistration $true (Join-Path $installRoot 'DriverLoom.exe') $true
         $process = Start-Process -FilePath $uninstaller -WindowStyle Hidden -ArgumentList '/S' -PassThru
         Wait-TestProcess $process
     }
@@ -56,6 +61,7 @@ function Invoke-TestUninstall {
     Assert-Installer $false (Test-Path -LiteralPath $shortcutPath) 'Start menu shortcut removed'
     Assert-Installer $false (Test-Path -LiteralPath $desktopShortcutPath) 'desktop shortcut removed'
     Assert-Installer $false (Test-Path -LiteralPath $installRoot) 'program payload removed'
+    Assert-Installer $null ([Microsoft.Win32.Registry]::GetValue('HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run','DriverLoom',$null)) 'startup entry removed on uninstall'
 }
 
 function Assert-Shortcut([string]$path,[string]$label) {
@@ -112,7 +118,7 @@ try {
     Assert-Installer $false (Test-Path -LiteralPath $legacyShortcutPath) 'legacy shortcut replaced during upgrade'
     Assert-Installer $script:LauncherVersion $registration.DisplayVersion 'installed version'
     Assert-Installer $installRoot $registration.InstallLocation 'installation path with spaces'
-    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom-loops.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
+    foreach ($name in 'App.ps1', 'Engine.ps1', 'Lifecycle.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom-loops.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
         Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash "$name payload matches source"
     }
     Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'dist\host\DriverLoom.exe')).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot 'DriverLoom.exe')).Hash 'native host matches build'

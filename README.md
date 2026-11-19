@@ -8,9 +8,9 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 
 ## Get started
 
-1. Download and run **DriverLoom-Setup.exe**. Close DriverLoom first if you are upgrading; your settings are kept.
+1. Download and run **DriverLoom-Setup.exe**. Exit DriverLoom first if you are upgrading; if tray mode is enabled, right-click its icon and choose **Exit**. Your settings are kept.
 2. Choose whether to add **Start menu** and **Desktop** shortcuts.
-3. Open **DriverLoom**. It checks automatically. Use the refresh arrow to check again.
+3. Open **DriverLoom**. By default, it checks on opening. Use the refresh arrow to check again.
 4. When updates are found, **Update All** opens a review list. Eligible Windows Update drivers can be installed together after confirmation. **Review update** opens the official manufacturer page for packages requiring manual installation.
 
 ## Features
@@ -23,6 +23,12 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 
 Open the gear for Settings, About and Help. Double-click a device for details.
 
+## Checks and background operation
+
+In Settings, choose **Manual**, **On opening** (default), **Daily** or **Weekly**. Daily and weekly checks respect the last check time and run only while DriverLoom is open or kept in the tray. Checks never install drivers automatically.
+
+**Keep running in the tray** and **Start with Windows** are both off by default. With tray mode enabled, closing the window hides it; use the tray icon to reopen, check or exit. Windows startup opens the window unless tray mode is also enabled. DriverLoom does not install a background service or wake the PC to check.
+
 ## Current limits
 
 Automatic installation supports eligible **Windows Update drivers only**. Manufacturer packages require manual installation. Coverage varies by device; see the [coverage guide](docs/COVERAGE.md). DriverLoom does not flash firmware or restart your PC automatically.
@@ -33,10 +39,16 @@ DriverLoom requires no account and contains no analytics, advertising or usage t
 
 - **Local data:** hardware inventory, preferences, saved sources and diagnostic logs are stored on your PC in `%LOCALAPPDATA%\HardwareUpdateLauncher`. DriverLoom does not automatically upload these files.
 - **Copy list:** copies the displayed device or package names and reasons to the Windows clipboard when you select it.
-- **Update checks:** opening the app starts checks with Windows Update and manufacturer sites. Some manufacturer lookups include hardware-model and Windows-version details.
+- **Update checks:** checks contact Windows Update and manufacturer sites at the frequency you select, or when you use refresh. Some manufacturer lookups include hardware-model and Windows-version details.
 - **Optional GitHub access:** catalog and release metadata are fetched only if you configure a repository. Opening a vendor or repository link visits that site in your browser.
 
 External services can see normal connection information, including your connection's public IP address, and apply their own privacy policies. Windows Update's data handling is governed by Windows and Microsoft.
+
+## Support
+
+DriverLoom is a personal, volunteer-maintained project, provided as-is. Individual support, replies, fixes and response times are not guaranteed.
+
+Use [GitHub Issues](https://github.com/SJB-gif/DriverLoom/issues) for bug reports. Please do not contact the maintainer through personal email or social accounts. Keep reports free of serial numbers, hardware IDs and other personal information; review any copied diagnostic details before posting. No public support email is provided.
 
 ## Build from source
 

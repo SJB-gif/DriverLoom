@@ -18,7 +18,7 @@ function Invoke-NativeTest([string]$exe,[string[]]$arguments,[int]$expectedExit=
 }
 try{
     [void][IO.Directory]::CreateDirectory($stage)
-    foreach($name in 'App.ps1','Launch.ps1','Engine.ps1','Coverage.ps1','Manufacturers.ps1','Install.ps1','Theme.ps1','Theme.cs'){
+    foreach($name in 'App.ps1','Launch.ps1','Engine.ps1','Lifecycle.ps1','Coverage.ps1','Manufacturers.ps1','Install.ps1','Theme.ps1','Theme.cs'){
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name)
     }
     [void][IO.Directory]::CreateDirectory((Join-Path $stage 'assets'))
@@ -31,6 +31,10 @@ try{
     $result=(Invoke-NativeTest $exe @('-SmokeTest'))|ConvertFrom-Json
     if($result.NativeProcess -ne 'DriverLoom' -or $result.NativeAppID -ne 'SJB.DriverLoom' -or !$result.Is64BitProcess -or $result.ApartmentState -ne 'STA' -or !$result.Visible){throw 'Native application identity, bitness or startup failed.'}
     if($result.TaskbarWindowID -ne 'SJB.DriverLoom' -or $result.TaskbarIcon -ne ((Join-Path $stage 'assets\DriverLoom-loops.ico')+',0') -or $result.TaskbarCommand -ne ('"'+$exe+'"') -or $result.TaskbarName -ne 'DriverLoom'){throw 'Taskbar window icon or relaunch metadata was not applied.'}
+    $state=Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
+    Save-Json (Join-Path $state 'settings.json') ([pscustomobject]@{Repo='';Bios=$false;Sources=@();Theme='Dark';CheckFrequency='Manual';KeepRunningInTray=$true;StartWithWindows=$false})
+    $background=(Invoke-NativeTest $exe @('-SmokeTest','-Background'))|ConvertFrom-Json
+    if(!$background.BackgroundRequested -or !$background.BackgroundStartsHidden -or !$background.TrayVisible -or !$background.CloseHidesToTray -or !$background.RestoreRequestShowsWindow -or !$background.ShutdownAllowsExit -or $background.ScanStarted -or $background.AutomaticCheckOnOpening){throw 'Native tray lifecycle, manual frequency or background argument failed.'}
     $link=Join-Path $stage 'DriverLoom test.lnk'
     $shell=New-Object -ComObject WScript.Shell
     $shortcut=$shell.CreateShortcut($link);$shortcut.TargetPath=$exe;$shortcut.Save()

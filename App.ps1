@@ -1,21 +1,28 @@
-param([switch]$SmokeTest)
+param([switch]$SmokeTest,[switch]$Background)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
+if($SmokeTest){[Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.Forms.UnhandledExceptionMode]::ThrowException)}
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 . (Join-Path $PSScriptRoot 'Engine.ps1')
 . (Join-Path $PSScriptRoot 'Install.ps1')
 . (Join-Path $PSScriptRoot 'Theme.ps1')
+. (Join-Path $PSScriptRoot 'Lifecycle.ps1')
 
 $mutexName = if ($SmokeTest) { 'Local\HardwareUpdateLauncher-Smoke-' + [guid]::NewGuid().ToString('N') } else { 'Local\HardwareUpdateLauncher' }
 $mutex = [Threading.Mutex]::new($false, $mutexName)
 try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true }
 if (!$acquired) {
-    [void][Windows.Forms.MessageBox]::Show('DriverLoom is already open.', 'DriverLoom')
+    if(!$Background){
+        try{$existing=[Threading.EventWaitHandle]::OpenExisting('Local\DriverLoom.ShowWindow');try{[void]$existing.Set()}finally{$existing.Dispose()}}
+        catch{[void][Windows.Forms.MessageBox]::Show('DriverLoom is already open. Open it from the tray icon.', 'DriverLoom')}
+    }
     $mutex.Dispose()
     return
 }
+$restoreName=if($SmokeTest){'Local\DriverLoom.RestoreTest-'+[guid]::NewGuid().ToString('N')}else{'Local\DriverLoom.ShowWindow'}
+$restoreEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::AutoReset,$restoreName)
 
 $directory = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
 $settingsPath = Join-Path $directory 'settings.json'
@@ -35,6 +42,7 @@ if (!$script:settings.PSObject.Properties['Theme']) { $script:settings | Add-Mem
 if ($script:settings.Theme -notin 'Dark','Light','System') { $script:settings.Theme='Dark' }
 if (!$script:settings.PSObject.Properties['ShowUnsupported']) { $script:settings | Add-Member NoteProperty ShowUnsupported $false }
 if ($script:settings.ShowUnsupported -isnot [bool]) { $script:settings.ShowUnsupported=$false }
+Initialize-LifecyclePreferences $script:settings
 Set-AppTheme $script:settings.Theme
 $script:snapshot = $null
 if (Test-Path -LiteralPath $inventoryPath) {
@@ -47,6 +55,38 @@ $script:applyAfterScan = $false
 $script:lastScanError = ''
 $script:unsupportedRows = @()
 $script:hiddenWindowsCount = 0
+$script:lastScanAttempt = $null
+$script:nextSchedulePoll = [DateTimeOffset]::MinValue
+$script:exitRequested = $false
+
+function Restore-Window {
+    $form.Show()
+    if($form.WindowState -eq 'Minimized'){$form.WindowState='Normal'}
+    $form.Activate();$form.BringToFront()
+}
+
+function Set-StartupVisibility {
+    if($Background -and $script:settings.KeepRunningInTray){$form.Hide()}
+}
+
+function Receive-RestoreRequest {
+    if($restoreEvent.WaitOne(0)){Restore-Window}
+}
+
+function Invoke-ScheduledCheck {
+    if($SmokeTest){return}
+    $now=[DateTimeOffset]::UtcNow
+    if($now -lt $script:nextSchedulePoll){return}
+    $script:nextSchedulePoll=$now.AddMinutes(1)
+    if($script:job -or $script:installer){return}
+    if(Test-AutomaticCheckDue $script:settings.CheckFrequency $now $script:lastScanAttempt $script:snapshot.CapturedAt){Start-Scan}
+}
+
+function Handle-AppClosing($eventArgs) {
+    if($eventArgs.CloseReason -ne [Windows.Forms.CloseReason]::UserClosing){return}
+    if($script:installer){$eventArgs.Cancel=$true;$script:exitRequested=$false;return}
+    if($script:settings.KeepRunningInTray -and !$script:exitRequested){$eventArgs.Cancel=$true;$form.Hide()}
+}
 
 function Show-Message([string]$message) {
     $dialog=New-Dialog 'DriverLoom' 340
@@ -282,10 +322,11 @@ function Edit-Source($selection = $null) {
 }
 
 function Edit-Settings([switch]$Preview) {
-    $dialog = New-Dialog 'Settings | DriverLoom' 618
-    $dialog.ClientSize=[Drawing.Size]::new(940,618)
+    $dialog = New-Dialog 'Settings | DriverLoom' 688
+    $dialog.ClientSize=[Drawing.Size]::new(940,[Math]::Min(688,([Windows.Forms.Screen]::FromControl($form).WorkingArea.Height-90)))
     Add-DialogHeading $dialog 'Settings' "DRIVERLOOM $script:LauncherVersion  /  MAKE IT YOURS"
-    $appearance=Add-SettingsCard $dialog 'APPEARANCE' 24 110 432 142
+    $body=[Windows.Forms.Panel]::new();$body.SetBounds(0,110,940,($dialog.ClientSize.Height-184));$body.AutoScroll=$true;$body.AutoScrollMinSize=[Drawing.Size]::new(0,616);$dialog.Controls.Add($body)
+    $appearance=Add-SettingsCard $body 'APPEARANCE' 24 0 432 142
     $appearanceText=[Windows.Forms.Label]::new();$appearanceText.Text='Choose how DriverLoom looks.';$appearanceText.SetBounds(18,48,390,26);$appearance.Controls.Add($appearanceText)
     $themeButtons=@();$themeIndex=0
     foreach($choice in @(@('System','Match system'),@('Dark','Dark'),@('Light','Light'))){
@@ -294,17 +335,21 @@ function Edit-Settings([switch]$Preview) {
         $radio.Add_CheckedChanged({param($sender,$eventArgs)[DriverLoom.UI.Theme]::Apply($sender.Parent)})
         $appearance.Controls.Add($radio);$themeButtons+=$radio;$themeIndex++
     }
-    $updates=Add-SettingsCard $dialog 'UPDATES' 24 268 432 114
-    $updateText=[Windows.Forms.Label]::new();$updateText.Text='Checks run automatically when DriverLoom opens.';$updateText.SetBounds(18,44,394,24);$updates.Controls.Add($updateText)
-    $windowsUpdate=New-Button 'Open Windows Update';$windowsUpdate.SetBounds(18,74,394,30);$windowsUpdate.Add_Click({Open-WindowsUpdate});$updates.Controls.Add($windowsUpdate)
-    $firmware=Add-SettingsCard $dialog 'BIOS & FIRMWARE' 24 398 432 142
+    $updates=Add-SettingsCard $body 'UPDATES' 24 158 432 178
+    $frequencyLabel=[Windows.Forms.Label]::new();$frequencyLabel.Text='Check for updates';$frequencyLabel.SetBounds(18,46,160,28);$updates.Controls.Add($frequencyLabel)
+    $frequency=[Windows.Forms.ComboBox]::new();$frequency.DropDownStyle='DropDownList';$frequency.SetBounds(190,44,222,28)
+    foreach($choice in 'Manual','On opening','Daily','Weekly'){[void]$frequency.Items.Add($choice)}
+    $frequency.SelectedItem=$script:settings.CheckFrequency;$updates.Controls.Add($frequency)
+    $updateText=[Windows.Forms.Label]::new();$updateText.Text='Daily and weekly checks run only while DriverLoom is open or in the tray.';$updateText.Tag='Muted';$updateText.SetBounds(18,82,394,40);$updates.Controls.Add($updateText)
+    $windowsUpdate=New-Button 'Open Windows Update';$windowsUpdate.SetBounds(18,130,394,30);$windowsUpdate.Add_Click({Open-WindowsUpdate});$updates.Controls.Add($windowsUpdate)
+    $firmware=Add-SettingsCard $body 'BIOS & FIRMWARE' 24 352 432 142
     $biosBox = New-Object Windows.Forms.CheckBox
     $biosBox.Text = 'Enable BIOS checks and the USB guide'
     $biosBox.Checked = [bool]$script:settings.Bios
     $biosBox.SetBounds(18,44,394,30);$firmware.Controls.Add($biosBox)
     $biosGuide=New-Button 'Open USB guide';$biosGuide.SetBounds(18,86,178,34);$biosGuide.Enabled=[bool]$script:settings.Bios
     $biosGuide.Add_Click({Show-BiosGuide});$firmware.Controls.Add($biosGuide)
-    $coverage=Add-SettingsCard $dialog 'CHECK COVERAGE' 476 110 440 236
+    $coverage=Add-SettingsCard $body 'CHECK COVERAGE' 476 0 440 236
     $coverageText=[Windows.Forms.Label]::new();$coverageText.Text='Windows components stay hidden. Review devices and Windows Update offers that need a manual step.';$coverageText.SetBounds(18,44,404,46);$coverage.Controls.Add($coverageText)
     $showUnsupported=[Windows.Forms.CheckBox]::new();$showUnsupported.Text='Show unsupported devices in the hardware list';$showUnsupported.Checked=$script:settings.ShowUnsupported;$showUnsupported.SetBounds(18,94,404,28);$coverage.Controls.Add($showUnsupported)
     $unsupportedButton=New-Button ("Unsupported items ($($script:unsupportedRows.Count))")
@@ -313,34 +358,41 @@ function Edit-Settings([switch]$Preview) {
     $excludedButton=New-Button ("Windows Update exclusions ($excludedCount)")
     $excludedButton.SetBounds(18,172,404,32);$excludedButton.Add_Click({Show-WindowsExclusions})
     $coverage.Controls.AddRange(@($unsupportedButton,$excludedButton))
-    $advanced=Add-SettingsCard $dialog 'ADVANCED SOURCES' 476 362 440 178
+    $background=Add-SettingsCard $body 'RUNNING IN THE BACKGROUND' 476 252 440 154
+    $keepInTray=[Windows.Forms.CheckBox]::new();$keepInTray.Text='Keep running in the tray when the window is closed';$keepInTray.Checked=$script:settings.KeepRunningInTray;$keepInTray.SetBounds(18,44,404,28);$background.Controls.Add($keepInTray)
+    $startWithWindows=[Windows.Forms.CheckBox]::new();$startWithWindows.Text='Start DriverLoom when I sign in to Windows';$startWithWindows.Checked=$script:settings.StartWithWindows;$startWithWindows.SetBounds(18,78,404,28);$background.Controls.Add($startWithWindows)
+    $nativeLauncher=Join-Path $PSScriptRoot 'DriverLoom.exe';$startWithWindows.Enabled=(Test-Path -LiteralPath $nativeLauncher -PathType Leaf) -or $script:settings.StartWithWindows
+    $backgroundNote=[Windows.Forms.Label]::new();$backgroundNote.Text=if($startWithWindows.Enabled){'Use the tray menu to open DriverLoom or exit.'}else{'Start with Windows is available after installation.'};$backgroundNote.Tag='Muted';$backgroundNote.SetBounds(18,114,404,26);$background.Controls.Add($backgroundNote)
+    $advanced=Add-SettingsCard $body 'ADVANCED SOURCES' 476 422 440 178
     $catalogLabel=[Windows.Forms.Label]::new();$catalogLabel.Text='Optional public GitHub catalog (owner/repository)';$catalogLabel.SetBounds(18,46,404,26);$advanced.Controls.Add($catalogLabel)
     $repoBox=[Windows.Forms.TextBox]::new();$repoBox.Text=$script:settings.Repo;$repoBox.SetBounds(18,78,404,29);$advanced.Controls.Add($repoBox)
     $editButton=New-Button 'Edit selected device source';$editButton.SetBounds(18,122,404,34);$editButton.Enabled=[bool](Get-SelectedRow);$editButton.Add_Click({Edit-Source});$advanced.Controls.Add($editButton)
     $save = New-Button 'Save changes';$save.Primary=$true
-    $save.SetBounds(762,566,154,36)
+    $save.SetBounds(762,($dialog.ClientSize.Height-52),154,36)
     $save.DialogResult = 'OK'
-    $cancel=New-Button 'Cancel';$cancel.SetBounds(644,566,100,36);$cancel.DialogResult='Cancel'
+    $cancel=New-Button 'Cancel';$cancel.SetBounds(644,($dialog.ClientSize.Height-52),100,36);$cancel.DialogResult='Cancel'
     $footer=[Windows.Forms.Label]::new();$footer.Text='Your preferences are saved on this PC.';$footer.Tag='Muted';$footer.SetBounds(24,575,590,25)
-    $aboutButton=New-Button 'About';$aboutButton.SetBounds(24,566,80,36);$aboutButton.Add_Click({Show-About})
-    $helpButton=New-Button 'Help';$helpButton.SetBounds(116,566,80,36);$helpButton.Add_Click({Show-Help})
+    $aboutButton=New-Button 'About';$aboutButton.SetBounds(24,($dialog.ClientSize.Height-52),80,36);$aboutButton.Add_Click({Show-About})
+    $helpButton=New-Button 'Help';$helpButton.SetBounds(116,($dialog.ClientSize.Height-52),80,36);$helpButton.Add_Click({Show-Help})
     $footer.Visible=$false
     $dialog.Controls.AddRange(@($save,$cancel,$footer,$aboutButton,$helpButton))
     $dialog.AcceptButton = $save
     $dialog.CancelButton=$cancel
-    if($Preview){$dialog.Add_Shown({Save-FormPreview $dialog 'settings';$dialog.Close()})}
+    if($Preview){$dialog.Add_Shown({Save-FormPreview $dialog 'settings';$body.AutoScrollPosition=[Drawing.Point]::new(0,200);Save-FormPreview $dialog 'settings-scrolled';$dialog.Close()})}
     try {
         if ($dialog.ShowDialog($form) -ne 'OK') { return }
         $repo = $repoBox.Text.Trim()
         if ($repo -and ($repo -notmatch '^[a-z0-9_.-]+/[a-z0-9_.-]+$' -or $repo -match '(^|/)\.{1,2}(/|$)')) { throw 'Use owner/repository.' }
         $preference=[string]($themeButtons|Where-Object Checked|Select-Object -First 1).Tag
-        $next = [pscustomobject]@{ Repo = $repo; Bios = $biosBox.Checked; Sources = @($script:settings.Sources); Theme=$preference; ShowUnsupported=$showUnsupported.Checked }
-        Save-Json $settingsPath $next
+        $next = [pscustomobject]@{ Repo = $repo; Bios = $biosBox.Checked; Sources = @($script:settings.Sources); Theme=$preference; ShowUnsupported=$showUnsupported.Checked; CheckFrequency=[string]$frequency.SelectedItem; KeepRunningInTray=$keepInTray.Checked; StartWithWindows=$startWithWindows.Checked }
+        Save-LauncherPreferences $settingsPath $script:settings $next $nativeLauncher
         if ($script:snapshot -and $script:settings.Repo -ne $repo) {
             $script:snapshot.Repository = $null
             $script:snapshot.Checks = @()
         }
         $script:settings = $next
+        $tray.Visible=$script:settings.KeepRunningInTray
+        $script:nextSchedulePoll=[DateTimeOffset]::MinValue
         Set-AppTheme $preference $form
         Refresh-View
         $status.Text = 'Settings saved.'
@@ -430,6 +482,7 @@ function Show-BiosGuide {
 
 function Start-Scan {
     if ($script:job -or $script:installer) { return }
+    $script:lastScanAttempt=[DateTimeOffset]::UtcNow.ToString('o')
     $script:fresh = $false
     $script:lastScanError = ''
     try {
@@ -460,6 +513,8 @@ function Update-Controls {
     $primary.Text=if($script:installer){'Updating...'}else{'Update All'}
     $refresh.Enabled=!$busy
     $settingsMenu.Enabled=!$busy
+    $trayCheck.Enabled=!$busy
+    $trayExit.Enabled=$null -eq $script:installer
     Update-Footer
 }
 
@@ -505,7 +560,7 @@ function Show-About {
 }
 
 function Show-Help {
-    Show-Message "DriverLoom checks automatically when it opens. Use the refresh arrow to check again.`r`n`r`nUpdate All appears when a fresh check finds updates. It opens a review list; eligible Windows Update drivers can then be installed together. Manufacturer packages use official Review update links.`r`n`r`nDouble-click a device for source details. Unsupported items, excluded offers, About and Help are in Settings. Firmware flashing and reboots are never automatic."
+    Show-Message "Checks default to On opening. Choose Manual, Daily or Weekly in Settings, or use the refresh arrow at any time. Scheduled checks run only while DriverLoom is open or kept in the tray.`r`n`r`nTray mode and Start with Windows are off by default. When tray mode is enabled, closing hides the window; use the tray menu to open it or exit.`r`n`r`nUpdate All opens a review list. Eligible Windows Update drivers require confirmation; manufacturer packages use official Review update links. Double-click a device for source details. Firmware flashing and reboots are never automatic."
 }
 
 function Start-DriverInstallation {
@@ -546,6 +601,13 @@ $form.Text = "DriverLoom $script:LauncherVersion"
 $form.Icon=[Drawing.Icon]::new((Join-Path $PSScriptRoot 'assets\DriverLoom-loops.ico'))
 $form.Font=[Drawing.Font]::new('Segoe UI',10)
 $form.StartPosition='CenterScreen';$form.ClientSize=[Drawing.Size]::new(1240,850);$form.MinimumSize=[Drawing.Size]::new(1040,660);$form.AutoScaleMode='Dpi'
+$tray=[Windows.Forms.NotifyIcon]::new();$tray.Icon=$form.Icon;$tray.Text='DriverLoom';$tray.Visible=$script:settings.KeepRunningInTray
+$trayMenu=[Windows.Forms.ContextMenuStrip]::new();$trayMenu.Renderer=[DriverLoom.UI.MenuRenderer]::new()
+$trayOpen=[Windows.Forms.ToolStripMenuItem]::new('Open DriverLoom');$trayOpen.Add_Click({Restore-Window})
+$trayCheck=[Windows.Forms.ToolStripMenuItem]::new('Check for updates');$trayCheck.Add_Click({Start-Scan})
+$trayExit=[Windows.Forms.ToolStripMenuItem]::new('Exit');$trayExit.Add_Click({$script:exitRequested=$true;$form.Close()})
+[void]$trayMenu.Items.Add($trayOpen);[void]$trayMenu.Items.Add($trayCheck);[void]$trayMenu.Items.Add([Windows.Forms.ToolStripSeparator]::new());[void]$trayMenu.Items.Add($trayExit)
+$tray.ContextMenuStrip=$trayMenu;$tray.Add_DoubleClick({Restore-Window})
 $tooltips=[Windows.Forms.ToolTip]::new()
 $header=[DriverLoom.UI.TitleBar]::new();$header.Dock='Top'
 $header.Artwork=[Drawing.Image]::FromFile((Join-Path $PSScriptRoot 'assets\DriverLoom-brand.png'))
@@ -591,6 +653,7 @@ $hardware.Add_CellDoubleClick({param($sender,$eventArgs)if($eventArgs.RowIndex -
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({
+    Receive-RestoreRequest
     if ($script:job -and $script:job.State -in @('Completed', 'Failed', 'Stopped')) {
         try {
             $result=Receive-Job -Job $script:job -ErrorAction Stop
@@ -613,6 +676,7 @@ $timer.Add_Tick({
             Start-Scan
         }
     }
+    Invoke-ScheduledCheck
 })
 $form.Add_Shown({
     if ($SmokeTest) {
@@ -632,6 +696,16 @@ $form.Add_Shown({
             UpdateAllEnabled = Test-CanInstallSnapshot $script:snapshot $script:fresh $false
             UnsupportedCount = $script:unsupportedRows.Count
             ShowUnsupported = $script:settings.ShowUnsupported
+            CheckFrequency = $script:settings.CheckFrequency
+            KeepRunningInTray = $script:settings.KeepRunningInTray
+            StartWithWindows = $script:settings.StartWithWindows
+            TrayVisible = $tray.Visible
+            BackgroundRequested = [bool]$Background
+            AutomaticCheckOnOpening = Test-AutomaticCheckDue $script:settings.CheckFrequency ([DateTimeOffset]::UtcNow) $null $script:snapshot.CapturedAt $true
+            CloseHidesToTray = $false
+            RestoreRequestShowsWindow = $false
+            ShutdownAllowsExit = $false
+            BackgroundStartsHidden = $false
             WindowsManagedHidden = $script:hiddenWindowsCount
             MainDevices = @($hardware.Rows | ForEach-Object { $_.Cells[0].Value })
             MainButtonCount = 1
@@ -669,28 +743,41 @@ $form.Add_Shown({
         $script:smokeResult.FreshUpdateAllEnabled = Test-CanInstallSnapshot $script:snapshot $script:fresh $false
         $script:smokeResult.FreshActionVisible=$primary.Visible
         $script:smokeResult.FreshActionEnabled=$primary.Enabled
+        Set-StartupVisibility
+        $script:smokeResult.BackgroundStartsHidden=!$form.Visible
+        $closeProbe=[Windows.Forms.FormClosingEventArgs]::new([Windows.Forms.CloseReason]::UserClosing,$false)
+        Handle-AppClosing $closeProbe
+        $script:smokeResult.CloseHidesToTray=$closeProbe.Cancel -and !$form.Visible
+        [void]$restoreEvent.Set();Receive-RestoreRequest
+        $script:smokeResult.RestoreRequestShowsWindow=$form.Visible
+        $shutdownProbe=[Windows.Forms.FormClosingEventArgs]::new([Windows.Forms.CloseReason]::WindowsShutDown,$false)
+        Handle-AppClosing $shutdownProbe
+        $script:smokeResult.ShutdownAllowsExit=!$shutdownProbe.Cancel
         if($env:HARDWARE_LAUNCHER_TEST_PREVIEW){Save-FormPreview $form 'checked';Show-UpdateReview -Preview}
         if($env:DRIVERLOOM_UI_REVIEW -eq '1'){$timer.Start();return}
-        $form.Close()
+        $script:exitRequested=$true;$form.Close()
         return
     }
     $timer.Start()
-    Start-Scan
+    Set-StartupVisibility
+    if(Test-AutomaticCheckDue $script:settings.CheckFrequency ([DateTimeOffset]::UtcNow) $script:lastScanAttempt $script:snapshot.CapturedAt $true){Start-Scan}
 })
 $form.Add_FormClosing({
     param($sender, $eventArgs)
-    if ($script:installer) { $eventArgs.Cancel = $true }
+    Handle-AppClosing $eventArgs
 })
 try {
     Refresh-View
     Update-Controls
     Set-AppTheme $script:settings.Theme $form
-    [void]$form.ShowDialog()
+    [Windows.Forms.Application]::Run($form)
     if ($SmokeTest) { $script:smokeResult | ConvertTo-Json -Compress }
 } finally {
     $timer.Stop()
     if ($script:job) { Remove-Job -Job $script:job -Force }
     $timer.Dispose()
+    $tray.Visible=$false;$tray.Dispose();$trayMenu.Dispose()
+    $restoreEvent.Dispose()
     $header.Artwork.Dispose()
     $githubLight.Dispose();$githubDark.Dispose();$tooltips.Dispose()
     $form.Dispose()

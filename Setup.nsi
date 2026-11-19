@@ -10,7 +10,7 @@ ManifestSupportedOS Win10
 !include "FileFunc.nsh"
 
 !define APP "DriverLoom"
-!define VERSION "0.1.9"
+!define VERSION "0.1.10"
 !define UNINSTALL "Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher"
 !ifndef OUTPUT_EXE
   !define OUTPUT_EXE "DriverLoom-Setup.exe"
@@ -21,7 +21,7 @@ OutFile "${OUTPUT_EXE}"
 InstallDir "$LOCALAPPDATA\Programs\HardwareUpdateLauncher"
 ShowInstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.9.0"
+VIProductVersion "0.1.10.0"
 VIAddVersionKey "ProductName" "${APP}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${APP} Setup"
@@ -124,7 +124,7 @@ Function .onInit
   System::Call 'kernel32::OpenMutexW(i 0x100000, i 0, w "Local\HardwareUpdateLauncher") p.r0'
   ${If} $0 P<> 0
     System::Call 'kernel32::CloseHandle(p r0)'
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Close ${APP} before running setup again."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Exit ${APP} before running setup again. If it is in the tray, right-click its icon and choose Exit."
     Abort
   ${EndIf}
 FunctionEnd
@@ -143,6 +143,7 @@ Section "Install"
   File "Launch.ps1"
   File "App.ps1"
   File "Engine.ps1"
+  File "Lifecycle.ps1"
   File "Manufacturers.ps1"
   File "Coverage.ps1"
   File "Theme.ps1"
@@ -191,7 +192,7 @@ Function un.onInit
   System::Call 'kernel32::OpenMutexW(i 0x100000, i 0, w "Local\HardwareUpdateLauncher") p.r0'
   ${If} $0 P<> 0
     System::Call 'kernel32::CloseHandle(p r0)'
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Close ${APP} before uninstalling."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Exit ${APP} before uninstalling. If it is in the tray, right-click its icon and choose Exit."
     Abort
   ${EndIf}
 FunctionEnd
@@ -202,9 +203,11 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\${APP}.lnk"
   Delete "$DESKTOP\${APP}.lnk"
   DeleteRegKey HKCU "${UNINSTALL}"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "DriverLoom"
   Delete "$INSTDIR\Launch.ps1"
   Delete "$INSTDIR\App.ps1"
   Delete "$INSTDIR\Engine.ps1"
+  Delete "$INSTDIR\Lifecycle.ps1"
   Delete "$INSTDIR\Manufacturers.ps1"
   Delete "$INSTDIR\Coverage.ps1"
   Delete "$INSTDIR\Theme.ps1"

@@ -123,6 +123,15 @@ namespace DriverLoom.UI
     {
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr handle, int attribute, ref int value, int size);
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr handle, string app, string id);
+        static void PaintChoice(object sender, DrawItemEventArgs e)
+        {
+            ComboBox combo = (ComboBox)sender;
+            Color background = (e.State & DrawItemState.Selected) != 0 ? Palette.Selected : Palette.Input;
+            using (SolidBrush brush = new SolidBrush(background)) e.Graphics.FillRectangle(brush, e.Bounds);
+            string text = e.Index >= 0 ? Convert.ToString(combo.Items[e.Index]) : combo.Text;
+            TextRenderer.DrawText(e.Graphics, text, combo.Font, e.Bounds, Palette.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            e.DrawFocusRectangle();
+        }
         public static void Apply(Control control)
         {
             control.BackColor = Palette.Background;
@@ -162,7 +171,9 @@ namespace DriverLoom.UI
             TextBox box = control as TextBox;
             if (box != null) { box.BackColor = Palette.Input; box.ForeColor = Palette.Text; box.BorderStyle = BorderStyle.FixedSingle; }
             ComboBox combo = control as ComboBox;
-            if (combo != null) { combo.BackColor = Palette.Input; combo.ForeColor = Palette.Text; combo.FlatStyle = FlatStyle.Flat; }
+            if (combo != null) { combo.BackColor = Palette.Input; combo.ForeColor = Palette.Text; combo.FlatStyle = FlatStyle.Flat; combo.DrawMode = DrawMode.OwnerDrawFixed; combo.ItemHeight = combo.Font.Height + 8; combo.DrawItem -= PaintChoice; combo.DrawItem += PaintChoice; }
+            ScrollableControl scrolling = control as ScrollableControl;
+            if (scrolling != null && scrolling.AutoScroll) { try { SetWindowTheme(scrolling.Handle, Palette.Dark ? "DarkMode_Explorer" : "Explorer", null); } catch { } }
             DataGridView grid = control as DataGridView;
             if (grid != null)
             {
@@ -218,7 +229,7 @@ namespace DriverLoom.UI
             if (Decorated && Rows.Count == 0)
             {
                 Rectangle text = new Rectangle(24, ColumnHeadersHeight + 60, Math.Max(1, Width - 48), 60);
-                using (Font font = new Font("Segoe UI", 11)) TextRenderer.DrawText(e.Graphics, "Your supported hardware results will appear here.\r\nA check starts automatically. Use the refresh arrow to check again.", font, text, Palette.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                using (Font font = new Font("Segoe UI", 11)) TextRenderer.DrawText(e.Graphics, "Your hardware results will appear here.\r\nUse the refresh arrow to check for updates.", font, text, Palette.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             }
         }
         protected override void OnCellPainting(DataGridViewCellPaintingEventArgs e)

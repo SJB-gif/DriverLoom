@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("DriverLoom")]
 [assembly: System.Reflection.AssemblyProduct("DriverLoom")]
-[assembly: System.Reflection.AssemblyVersion("0.1.9.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.1.9.0")]
+[assembly: System.Reflection.AssemblyVersion("0.1.10.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.1.10.0")]
 
 namespace DriverLoom
 {
@@ -150,6 +150,7 @@ namespace DriverLoom
                             ps.Commands.Clear();
                         }
                         ps.AddCommand(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Launch.ps1")).AddParameter("SmokeTest", smoke);
+                        if (Array.IndexOf(args, "-Background") >= 0) ps.AddParameter("Background", true);
                         foreach (PSObject result in ps.Invoke()) Console.WriteLine(result == null ? "" : result.ToString());
                         if (ps.HadErrors && host.ExitCode == 0) throw new InvalidOperationException(ps.Streams.Error[0].ToString());
                     }

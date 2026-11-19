@@ -8,18 +8,25 @@ function Assert-Startup($expected, $actual, [string]$description) {
     if ($actual -cne $expected) { throw "$description expected '$expected', got '$actual'." }
 }
 
-function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '', [Nullable[bool]]$showUnsupported = $null) {
+function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '', [Nullable[bool]]$showUnsupported = $null, [hashtable]$lifecycle = @{}) {
     $env:LOCALAPPDATA = Join-Path $testRoot $name
     $state = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
     [void][IO.Directory]::CreateDirectory($state)
     $preferences=@{ Repo = ''; Bios = $biosEnabled; Sources = @() }
     if($theme){$preferences.Theme=$theme}
     if($null -ne $showUnsupported){$preferences.ShowUnsupported=$showUnsupported}
+    foreach($key in $lifecycle.Keys){$preferences[$key]=$lifecycle[$key]}
     Save-Json (Join-Path $state 'settings.json') $preferences
     if ($snapshot) { Save-Json (Join-Path $state 'inventory.json') $snapshot }
-    $output = & $powerShell -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Launch.ps1') -SmokeTest
-    if ($LASTEXITCODE -ne 0) { throw "$name startup failed with exit code $LASTEXITCODE." }
-    $result = ($output -join [Environment]::NewLine) | ConvertFrom-Json
+    $outputPath=Join-Path $testRoot ($name+'-output.json')
+    $errorPath=Join-Path $testRoot ($name+'-error.txt')
+    $process=Start-Process -FilePath $powerShell -WindowStyle Hidden -ArgumentList @('-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $PSScriptRoot 'Launch.ps1')+'"'),'-SmokeTest') -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -PassThru
+    try{
+        $null=$process.Handle
+        if(!$process.WaitForExit(20000)){$process.Kill();throw "$name startup smoke test timed out."}
+        if($process.ExitCode -ne 0){throw "$name startup failed: $([IO.File]::ReadAllText($errorPath))"}
+    }finally{$process.Dispose()}
+    $result = [IO.File]::ReadAllText($outputPath) | ConvertFrom-Json
     Assert-Startup $script:LauncherVersion $result.Version "$name version"
     Assert-Startup 'DriverLoom' $result.ProductName "$name product identity"
     Assert-Startup "DriverLoom $script:LauncherVersion" $result.WindowTitle "$name branded window title"
@@ -41,6 +48,13 @@ function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [strin
     Assert-Startup 'Settings' ($result.MenuItems -join ',') "$name gear-only top navigation"
     Assert-Startup $false $result.UpdateAllEnabled "$name saved offers cannot be installed"
     Assert-Startup $biosEnabled $result.BiosEnabled "$name BIOS opt-in"
+    Assert-Startup $(if($lifecycle.ContainsKey('CheckFrequency')){$lifecycle.CheckFrequency}else{'On opening'}) $result.CheckFrequency "$name check schedule preference"
+    Assert-Startup ([bool]$lifecycle.KeepRunningInTray) $result.KeepRunningInTray "$name tray opt-in preference"
+    Assert-Startup ([bool]$lifecycle.StartWithWindows) $result.StartWithWindows "$name Windows startup preference"
+    Assert-Startup ([bool]$lifecycle.KeepRunningInTray) $result.TrayVisible "$name notification area icon follows preference"
+    Assert-Startup ([bool]$lifecycle.KeepRunningInTray) $result.CloseHidesToTray "$name close hides only when enabled"
+    Assert-Startup $true $result.RestoreRequestShowsWindow "$name reopening restores existing window"
+    Assert-Startup $true $result.ShutdownAllowsExit "$name tray mode does not block Windows shutdown"
     return $result
 }
 
@@ -49,6 +63,11 @@ try {
     Assert-Startup 0 $empty.HardwareRows 'empty inventory'
     Assert-Startup 0 $empty.DriverRows 'empty offers'
     Assert-Startup $false $empty.FreshActionVisible 'no updates means no Update All action'
+    Assert-Startup $true $empty.AutomaticCheckOnOpening 'default checks on opening'
+    $manual=Invoke-StartupCase 'manual-tray' $null $false '' $null @{CheckFrequency='Manual';KeepRunningInTray=$true;StartWithWindows=$true}
+    Assert-Startup $false $manual.AutomaticCheckOnOpening 'manual mode suppresses automatic startup check'
+    $daily=Invoke-StartupCase 'daily' $null $false '' $null @{CheckFrequency='Daily'}
+    Assert-Startup $true $daily.AutomaticCheckOnOpening 'daily first launch is due'
     $snapshot = [pscustomobject]@{
         CapturedAt = '2026-11-19T00:00:00Z'; OS = 'Windows test fixture'
         Inventory = @(

@@ -1,11 +1,13 @@
-param([switch]$SmokeTest)
+param([switch]$SmokeTest,[switch]$Background)
 
 $ErrorActionPreference = 'Stop'
 try {
     $nativeHost=Join-Path $PSScriptRoot 'DriverLoom.exe'
     # Old pinned shortcuts may still target PowerShell. Forward them to the branded host.
     if(!$SmokeTest -and !('DriverLoom.ShellIdentity' -as [type]) -and (Test-Path -LiteralPath $nativeHost)){
-        Start-Process -FilePath $nativeHost -WindowStyle Hidden
+        $start=@{FilePath=$nativeHost;WindowStyle='Hidden'}
+        if($Background){$start.ArgumentList='-Background'}
+        Start-Process @start
         return
     }
     if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion -lt [version]'5.1' -or ![Environment]::Is64BitProcess) {
@@ -14,7 +16,7 @@ try {
     if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
         throw 'The launcher requires STA mode. Open the installed Start menu shortcut.'
     }
-    & (Join-Path $PSScriptRoot 'App.ps1') -SmokeTest:$SmokeTest
+    & (Join-Path $PSScriptRoot 'App.ps1') -SmokeTest:$SmokeTest -Background:$Background
 } catch {
     $failure = $_
     $log = $null
