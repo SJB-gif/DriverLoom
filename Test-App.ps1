@@ -3,11 +3,6 @@ $ErrorActionPreference = 'Stop'
 $powerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('hardware-launcher-ui-' + [guid]::NewGuid().ToString('N'))
 $originalLocalAppData = $env:LOCALAPPDATA
-$existingMutex = $null
-if ([Threading.Mutex]::TryOpenExisting('Local\HardwareUpdateLauncher', [ref]$existingMutex)) {
-    $existingMutex.Dispose()
-    throw 'Close Hardware Update Launcher before running startup checks.'
-}
 
 function Assert-Startup($expected, $actual, [string]$description) {
     if ($actual -cne $expected) { throw "$description expected '$expected', got '$actual'." }
@@ -42,12 +37,25 @@ try {
             (New-HardwareRow 'GPU driver' 'Example' 'Test GPU' 'PCI TEST' '' '1.0' @('PCI TEST'))
             (New-HardwareRow 'BIOS' 'Example' 'Test board' '' '1' '1.0' @())
         )
-        Checks = @(); Warnings = @(); Repository = $null; WindowsUpdateOK = $true
+        Checks = @(); Warnings = @(); Repository = $null; WindowsUpdateOK = $true; WindowsUpdateOfferCount = 3
         Offers = @([pscustomobject]@{ Title = 'Test offer'; Class = 'Display'; HardwareId = 'PCI TEST'; Date = '2026-11-19' })
+        ExcludedOffers = @(
+            [pscustomobject]@{ Title = 'Test monitor'; Class = 'OtherHardware'; HardwareId = 'TEST MONITOR'; Date = '2026-11-19'; Reasons = @('Unsupported automatic-install class: OtherHardware.', 'Package may request user interaction; review in Windows Update.') }
+            [pscustomobject]@{ Title = 'Test firmware'; Class = 'Firmware'; HardwareId = 'TEST FIRMWARE'; Date = '2026-11-19'; Reasons = @('Firmware/BIOS is excluded from Update All; use the manufacturer workflow.') }
+        )
     }
     $cached = Invoke-StartupCase 'cached' $snapshot $false
     Assert-Startup 1 $cached.HardwareRows 'BIOS hidden by default'
-    Assert-Startup 1 $cached.DriverRows 'saved offers render'
+    Assert-Startup 3 $cached.DriverRows 'eligible and excluded offers render'
+    Assert-Startup 2 $cached.ExcludedDriverRows 'excluded offers remain visible'
+    Assert-Startup $true $cached.FreshUpdateAllEnabled 'fresh eligible offer can enable Update All'
+    Assert-Startup $true ($cached.Summary -like '*3 offered; 1 eligible; 2 excluded*') 'summary distinguishes offered and excluded counts'
+    $snapshot.Offers = @()
+    $snapshot.WindowsUpdateOfferCount = 2
+    $excludedOnly = Invoke-StartupCase 'excluded-only' $snapshot $false
+    Assert-Startup 2 $excludedOnly.DriverRows 'excluded rows render when none are eligible'
+    Assert-Startup $false $excludedOnly.UpdateAllEnabled 'excluded offers never enable Update All'
+    Assert-Startup $false $excludedOnly.FreshUpdateAllEnabled 'fresh excluded-only scan cannot enable Update All'
     $optIn = Invoke-StartupCase 'bios-opt-in' $snapshot $true
     Assert-Startup 2 $optIn.HardwareRows 'BIOS inventory after opt-in'
 

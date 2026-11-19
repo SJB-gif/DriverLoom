@@ -2,7 +2,7 @@
 
 An MIT-licensed Windows 10/11 x64 prototype for recording hardware, checking saved manufacturer sources and applying eligible Windows Update drivers.
 
-Current source: **0.1.2**, maintained at [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/HardwareUpdateLauncher). See [Windows verification](docs/VERIFICATION.md) and the [release draft](docs/RELEASE_NOTES_0.1.2.md). No release has been published yet.
+Current source: **0.1.3**, maintained at [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/HardwareUpdateLauncher). See the [0.1.3 changes](docs/RELEASE_NOTES_0.1.3.md) and [earlier Windows verification](docs/VERIFICATION.md). No release has been published yet.
 
 ## Run it
 
@@ -10,7 +10,7 @@ Open `HardwareUpdateLauncher-Setup.exe`. Setup installs for the current user and
 
 1. The launcher scans on opening and records a local inventory. Use **Check for updates** to refresh the inventory, compatible Windows Update offers and manufacturer versions at any time.
 2. Choose a device, then **Open source** to find its official support page. **Edit source** saves the exact page or feed. An optional pattern with a named `version` group lets the launcher read it repeatedly. For HTML and JSON sources, the pattern runs on the response text. Leave the pattern blank to save a manual support link.
-3. Review the **Windows Update offers** tab. **Update All** asks for confirmation and administrator approval, re-checks the approved update IDs and revisions, and applies each eligible offer through Windows Update Agent. The results window lists what installed or failed. It pauses remaining installations when a restart is required.
+3. Review the **Windows Update offers** tab. It shows eligible and excluded offers, including every exclusion reason. Excluded packages never enter **Update All**. **Update All** asks for confirmation and administrator approval, re-checks the approved update IDs and revisions, and applies each eligible offer through Windows Update Agent. The results window lists what installed or failed. It pauses remaining installations when a restart is required. Manufacturer packages are checked separately; select their hardware or package row and use **Open source** to review and install through the vendor.
 4. In **Settings**, enable **BIOS checks and USB preparation guide** if wanted. The guide shows the model, board revision and installed BIOS. If the manufacturer calls for copying a file to the USB root, use **Copy prepared file to USB** with the file already extracted and renamed according to the vendor instructions. The app copies to an explicitly chosen USB volume and refuses to overwrite an existing file. Formatting, making bootable media and flashing are vendor-managed steps.
 
 The inventory and saved links live in `%LOCALAPPDATA%\HardwareUpdateLauncher\inventory.json` and `settings.json`. The inventory includes motherboard and BIOS details, RAM part numbers, CPU model, storage firmware reported by Windows, display drivers and selected PCI chipset, networking, media and storage drivers. Available fields depend on what the hardware and Windows expose. Ordinary RAM modules and CPUs are inventory entries. The launcher keeps its hardware inventory local. It contacts Windows Update, saved manufacturer URLs and the optional GitHub repository.
@@ -18,7 +18,10 @@ The inventory and saved links live in `%LOCALAPPDATA%\HardwareUpdateLauncher\inv
 ## Coverage
 
 - Windows Update availability follows the Windows-configured update service, its compatibility decisions and any organisation policy. It can offer a different package from the manufacturer's website.
-- The initial manufacturer adapter covers Samsung retail 990 PRO, 990 EVO Plus, 990 EVO and 980 PRO firmware. Other devices show a vendor portal where recognised, and can use a saved support link, a page pattern or a reviewed catalog entry. Browser-rendered version lists may require a vendor feed or manual review.
+- NVIDIA GeForce checks resolve the exact GPU in NVIDIA's product lookup, require that GPU and the Windows version in the returned supported-products metadata, and compare non-beta WHQL Game Ready drivers. Windows driver versions are converted to NVIDIA's published numbering for comparison.
+- AMD checks compare installed **AMD Chipset Software** and **AMD Software: Adrenalin Edition** package versions with the official chipset and exact Ryzen-processor pages for the detected Windows version. The graphics adapter currently supports integrated Radeon Graphics on recognised Ryzen 7000/8000/9000 desktop processors. Individual Windows graphics and SMBus driver numbers are not compared with package numbers.
+- ASUS motherboard checks validate the exact board model and OS in ASUS's driver feed. Component matching covers Intel I225/I226 LAN, MediaTek MT7922/RZ616 Wi-Fi and recognised onboard Realtek USB audio. A package for a different NIC, Wi-Fi vendor or motherboard is not selected. The board feed may contain older versions than Windows Update; these are shown as installed versions being higher, not upgrade recommendations.
+- Existing Samsung retail 990 PRO, 990 EVO Plus, 990 EVO and 980 PRO firmware checks remain available. Other devices explicitly show that they were not checked, point to a related package, or identify Windows-managed components. A saved exact page/pattern or reviewed catalog entry still overrides built-in checks. Unsupported hardware is never reported as current.
 - **Update All** applies eligible Windows Update driver offers. Manufacturer-only packages and firmware remain separate. Firmware classes, identified firmware and interactive packages are excluded from the install queue. Duplicate offers for a single hardware ID and class are surfaced for review. Licences requiring extended review are deferred to Windows Update.
 - Vendor pages can publish different numbering from the installed Windows driver. Only comparable version strings or recognised Samsung firmware revisions get ordered automatically. Other differences are shown for review. Check the exact model and revision before applying a vendor package.
 
@@ -51,7 +54,7 @@ To build from source, install stock NSIS 3.11 or later, then use **64-bit Window
 .\Build.ps1 -MakeNSIS 'C:\Program Files (x86)\NSIS\makensis.exe'
 ```
 
-This runs the engine and Windows Forms startup checks, then writes `dist\HardwareUpdateLauncher-Setup.exe` and its SHA-256 sidecar. End users need only the installer EXE. The setup program uses NSIS's bundled x86 Unicode stub, accepts only native x64 Windows 10/11, and explicitly starts 64-bit Windows PowerShell. The finish-page command uses `Sysnative` from the 32-bit setup process; the Start menu shortcut uses `System32` from the Windows shell.
+This runs engine, manufacturer matching and Windows Forms startup checks, then writes `dist\HardwareUpdateLauncher-Setup.exe` and its SHA-256 sidecar. End users need only the installer EXE. The setup program uses NSIS's bundled x86 Unicode stub, accepts only native x64 Windows 10/11, and explicitly starts 64-bit Windows PowerShell. The finish-page command uses `Sysnative` from the 32-bit setup process; the Start menu shortcut uses `System32` from the Windows shell.
 
 Run the following on a clean test user or disposable Windows machine to verify the installer:
 

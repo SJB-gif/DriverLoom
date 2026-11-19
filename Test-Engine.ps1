@@ -45,7 +45,7 @@ Assert-Equal 4 $result.Checks.Count 'disabled BIOS'
 Assert-Equal '31.0.10.2' $result.Checks[0].Available 'saved source'
 Assert-Equal '8B2QJXD7' $result.Checks[1].Available 'Samsung version extraction'
 Assert-Equal 'Newer at source' $result.Checks[1].Status 'Samsung comparison'
-Assert-Equal 'Needs exact vendor source' $result.Checks[2].Status 'OEM SSD must use its exact source'
+Assert-Equal 'Not checked; no automatic manufacturer adapter' $result.Checks[2].Status 'OEM SSD must use its exact source'
 $settings.Bios = $true
 $settings.Sources[0].Url = 'https://example.com/ambiguous'
 $result = Get-VendorResults @($gpu, $bios) $settings $warnings
@@ -73,6 +73,23 @@ $offer.DriverClass = 'Display'
 $offer.InstallationBehavior.CanRequestUserInput = $true
 Assert-Equal $null (Get-DriverOffer $offer) 'interactive offer is excluded'
 Assert-Equal 0 @(Get-UnambiguousOffers @($eligible, $eligible) $warnings).Count 'duplicate offers are held for review'
+$offer.DriverClass = 'OtherHardware'
+$report = Get-WindowsOfferReport @($offer) $warnings
+Assert-Equal 1 $report.Total 'all offered packages are counted'
+Assert-Equal 0 $report.Offers.Count 'excluded packages do not enter the install queue'
+Assert-Equal 1 $report.ExcludedOffers.Count 'excluded package retained for display'
+Assert-Equal 2 $report.ExcludedOffers[0].Reasons.Count 'class and interaction reasons are both retained'
+$duplicate = [pscustomobject]@{
+    DriverClass = 'Display'; Title = 'Duplicate test'; DriverHardwareID = 'PCI TEST'
+    DriverVerDate = '2026-11-19'; Identity = @{ UpdateID = '706591a4-434c-4088-b01b-aa463a34f071'; RevisionNumber = 3 }
+    InstallationBehavior = @{ CanRequestUserInput = $false }
+}
+$report = Get-WindowsOfferReport @($duplicate, $duplicate) $warnings
+Assert-Equal 0 $report.Offers.Count 'duplicate report cannot enable installation'
+Assert-Equal 2 $report.ExcludedOffers.Count 'both duplicate packages have an explanation'
+Assert-Equal $true ($report.ExcludedOffers[0].Reasons[0] -like 'Multiple offers*') 'duplicate reason'
+$report = Get-WindowsOfferReport @() $warnings
+Assert-Equal 0 $report.Total 'empty Windows Update result'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("hardware-launcher-" + [guid]::NewGuid() + '.json')
 try {
     Save-Json $temp @{ Revision = 1 }

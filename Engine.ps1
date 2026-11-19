@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.2'
+$script:LauncherVersion = '0.1.3'
+. (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 
 function Save-Json($path, $data) {
     $temp = "$path.$([guid]::NewGuid().ToString('N')).tmp"
@@ -82,6 +83,16 @@ function Get-HardwareInventory {
             $rows.Add((New-HardwareRow $kind $driver.Manufacturer $driver.DeviceName $driver.HardWareID '' $driver.DriverVersion $ids))
         }
     } catch { $warnings.Add("Driver inventory: $_") }
+    $hardwareRows = $rows.ToArray()
+    if ((Get-AmdChipsetSource $hardwareRows) -or (Get-AmdGraphicsSource $hardwareRows)) {
+        $packages = Get-InstalledAmdPackages
+        if (Get-AmdChipsetSource $hardwareRows) {
+            $rows.Add((New-HardwareRow 'Chipset package' 'AMD' 'AMD Chipset Software' $board.Product $board.Version $packages.Chipset @()))
+        }
+        if (Get-AmdGraphicsSource $hardwareRows) {
+            $rows.Add((New-HardwareRow 'GPU software' 'AMD' 'AMD Software: Adrenalin Edition' '' '' $packages.Graphics @()))
+        }
+    }
     [pscustomobject]@{
         CapturedAt = [DateTimeOffset]::Now.ToString('o')
         OS = [Environment]::OSVersion.Version.ToString()
@@ -129,7 +140,7 @@ function Get-HttpsUri([string]$value) {
 function Read-WebSource([string]$url, [int]$limit = 2097152) {
     $uri = Get-HttpsUri $url
     $request = [Net.HttpWebRequest]::Create($uri)
-    $request.UserAgent = 'HardwareUpdateLauncher/0.1.2'
+    $request.UserAgent = 'HardwareUpdateLauncher/0.1.3'
     $request.AllowAutoRedirect = $false
     $request.Timeout = 12000
     $request.ReadWriteTimeout = 12000
@@ -212,10 +223,12 @@ function Convert-HtmlToText([string]$html) {
     return [Net.WebUtility]::HtmlDecode($content)
 }
 
-function Get-VendorResults($inventory, $settings, $warnings) {
+function Get-VendorResults($inventory, $settings, $warnings, [string]$osVersion = ([Environment]::OSVersion.Version.ToString())) {
     $system = $inventory | Where-Object Kind -eq 'System' | Select-Object -First 1
     $repo = Get-RepositoryCatalog $settings.Repo $warnings
     $pageCache = @{}
+    $target = $null
+    try { $target = Get-WindowsDriverTarget $osVersion } catch { $warnings.Add($_.Exception.Message) }
     $checks = foreach ($row in $inventory) {
         if ($row.Kind -eq 'BIOS' -and !$settings.Bios) { continue }
         $portal = Get-VendorPortal $row $system
@@ -232,11 +245,23 @@ function Get-VendorResults($inventory, $settings, $warnings) {
         }
         $builtInSource = $false
         if (!$source) {
+            if ($target -and $row.Kind -notin 'BIOS', 'CPU', 'RAM', 'System', 'Motherboard') {
+                $automatic = Get-AutomaticManufacturerCheck $row $inventory $target $pageCache
+                if ($automatic) { $automatic; continue }
+            }
             $source = Get-SamsungSource $row
             $builtInSource = [bool]$source
         }
-        $check = [pscustomobject]@{ Key = $row.Key; Current = $row.Current; Available = ''; Url = $portal; Status = 'Needs exact vendor source' }
-        if ($row.Kind -in 'CPU', 'RAM' -and !$source) { $check.Status = 'Inventory only' }
+        $check = [pscustomobject]@{ Key = $row.Key; Current = $row.Current; Available = ''; Url = $portal; Status = 'Not checked; no automatic manufacturer adapter'; Detail = 'Save an exact manufacturer source with a version pattern, or review the official support page.'; Checked = $false }
+        if ($row.Kind -in 'CPU', 'RAM', 'System', 'Motherboard' -and !$source) { $check.Status = 'Inventory only'; $check.Detail = 'This identity is used for hardware and package matching.' }
+        elseif (!$source -and $row.Kind -eq 'Chipset/system driver' -and $row.Manufacturer -match 'AMD|Advanced Micro Devices' -and (Get-AmdChipsetSource $inventory)) {
+            $check.Status = 'See AMD Chipset Software package check'; $check.Url = Get-AmdChipsetSource $inventory
+            $check.Detail = 'Chipset package versions differ from individual SMBus, PCI and power-management driver versions.'
+        } elseif (!$source -and $row.Model -match '^(Microsoft |WAN Miniport|PCI Express |PCI standard |High Definition Audio Controller$)') {
+            $check.Status = 'Windows-managed; see Windows Update offers'; $check.Detail = 'No standalone manufacturer version comparison is made for this Windows component.'
+        } elseif (!$source -and $row.Kind -eq 'Audio/video driver' -and $row.Model -match '^(AMD|NVIDIA).*Audio') {
+            $check.Status = 'See GPU package check'; $check.Detail = 'The audio component has its own version; do not compare it with the GPU package number.'
+        }
         if ($source) {
             try {
                 $uri = Get-HttpsUri $source.Url
@@ -258,31 +283,66 @@ function Get-VendorResults($inventory, $settings, $warnings) {
                 $versions = @($pattern.Matches($page) | ForEach-Object { $_.Groups['version'].Value.Trim() } | Where-Object { $_ } | Select-Object -Unique)
                 if ($versions.Count -ne 1 -or $versions[0] -notmatch '^[a-z0-9][a-z0-9._+ -]{0,39}$') { throw 'Expected one unambiguous version in the vendor response.' }
                 $check.Available = $versions[0]
+                $check.Checked = $true
+                $check.Detail = 'Version read from the saved, catalog or built-in manufacturer source.'
                 $check.Status = Compare-ReportedVersion $row.Current $check.Available
                 if ($builtInSource -and $row.Current -match '^[0-9]([A-Z0-9]+)$' -and
                     $check.Available -match "^[0-9]$($Matches[1])$" -and $row.Current -ne $check.Available) {
                     $check.Status = if ($check.Available[0] -gt $row.Current[0]) { 'Newer at source' } else { 'Installed version is higher' }
                 }
-            } catch { $check.Status = "Source check failed: $($_.Exception.Message)" }
+            } catch { $check.Status = "Source check failed: $($_.Exception.Message)"; $check.Detail = $_.Exception.Message; $check.Checked = $false }
         }
         $check
     }
     [pscustomobject]@{ Checks = @($checks); Repository = $repo }
 }
 
-function Get-DriverOffer($update) {
+function Get-DriverOfferReasons($update) {
     $class = ([string]$update.DriverClass).Trim()
     $title = [string]$update.Title
     $hardwareId = [string]$update.DriverHardwareID
-    if (!$hardwareId -or $class -notin @('Display','Net','Media','HDC','SCSIAdapter','System','Extension','SoftwareComponent','Bluetooth','USB','HIDClass','Mouse','Keyboard','Printer','Camera','Image','Monitor','Sensor','AudioEndpoint','Ports','DiskDrive') -or
-        "$title $hardwareId" -match '(?i)\b(firmware|bios|uefi|microcode|capsule|flash)\b|UEFI\\|RES_[\{]' -or
-        $update.InstallationBehavior.CanRequestUserInput) { return }
+    if (!$hardwareId) { 'Windows Update did not expose a hardware ID.' }
+    if ($class -eq 'Firmware' -or "$title $hardwareId" -match '(?i)\b(firmware|bios|uefi|microcode|capsule|flash)\b|UEFI\\|RES_[\{]') {
+        'Firmware/BIOS is excluded from Update All; use the manufacturer workflow.'
+    } elseif ($class -notin @('Display','Net','Media','HDC','SCSIAdapter','System','Extension','SoftwareComponent','Bluetooth','USB','HIDClass','Mouse','Keyboard','Printer','Camera','Image','Monitor','Sensor','AudioEndpoint','Ports','DiskDrive')) {
+        "Unsupported automatic-install class: $class."
+    }
+    if ($update.InstallationBehavior.CanRequestUserInput) { 'Package may request user interaction; review in Windows Update.' }
+}
+
+function Get-DriverOffer($update) {
+    if (@(Get-DriverOfferReasons $update).Count) { return }
     [pscustomobject]@{
         Id = ([guid]$update.Identity.UpdateID).ToString()
         Revision = [int]$update.Identity.RevisionNumber
-        Title = $title; Class = $class; HardwareId = $hardwareId
+        Title = [string]$update.Title; Class = ([string]$update.DriverClass).Trim(); HardwareId = [string]$update.DriverHardwareID
         Date = if ($update.DriverVerDate) { ([datetime]$update.DriverVerDate).ToString('yyyy-MM-dd') } else { '' }
     }
+}
+
+function Get-WindowsOfferReport($updates, $warnings) {
+    $candidates = [System.Collections.Generic.List[object]]::new()
+    $excluded = [System.Collections.Generic.List[object]]::new()
+    foreach ($update in @($updates)) {
+        $reasons = @(Get-DriverOfferReasons $update)
+        if ($reasons.Count) {
+            $excluded.Add([pscustomobject]@{
+                Title = [string]$update.Title; Class = ([string]$update.DriverClass).Trim(); HardwareId = [string]$update.DriverHardwareID
+                Date = if ($update.DriverVerDate) { ([datetime]$update.DriverVerDate).ToString('yyyy-MM-dd') } else { '' }
+                Reasons = $reasons
+            })
+        } else { $candidates.Add((Get-DriverOffer $update)) }
+    }
+    $eligible = @(Get-UnambiguousOffers $candidates.ToArray() $warnings)
+    foreach ($group in @($candidates.ToArray() | Group-Object Class, HardwareId | Where-Object Count -gt 1)) {
+        foreach ($offer in $group.Group) {
+            $excluded.Add([pscustomobject]@{
+                Title = $offer.Title; Class = $offer.Class; HardwareId = $offer.HardwareId; Date = $offer.Date
+                Reasons = @('Multiple offers target this hardware and class; review in Windows Update.')
+            })
+        }
+    }
+    [pscustomobject]@{ Offers = $eligible; ExcludedOffers = $excluded.ToArray(); Total = @($updates).Count }
 }
 
 function Search-WindowsDrivers($session) {
@@ -297,19 +357,25 @@ function Invoke-HardwareCheck($settings) {
     $warnings = [System.Collections.Generic.List[string]]::new()
     foreach ($warning in $data.Warnings) { $warnings.Add($warning) }
     $offers = @()
+    $excludedOffers = @()
+    $offerCount = 0
     $wuOk = $false
     try {
         $session = New-Object -ComObject Microsoft.Update.Session
         $session.ClientApplicationID = 'Hardware Update Launcher'
         $search = Search-WindowsDrivers $session
-        $offers = @(for ($i = 0; $i -lt $search.Updates.Count; $i++) { Get-DriverOffer ($search.Updates.Item($i)) })
+        $updates = @(for ($i = 0; $i -lt $search.Updates.Count; $i++) { $search.Updates.Item($i) })
+        $report = Get-WindowsOfferReport $updates $warnings
+        $offers = $report.Offers
+        $excludedOffers = $report.ExcludedOffers
+        $offerCount = $report.Total
         $wuOk = $true
     } catch { $warnings.Add("Windows Update: $_") }
-    $vendor = Get-VendorResults $data.Inventory $settings $warnings
-    $eligibleOffers = @(Get-UnambiguousOffers $offers $warnings)
+    $vendor = Get-VendorResults $data.Inventory $settings $warnings $data.OS
     [pscustomobject]@{
         CapturedAt = $data.CapturedAt; OS = $data.OS; Inventory = $data.Inventory; Warnings = $warnings.ToArray()
-        Offers = $eligibleOffers; WindowsUpdateOK = $wuOk; Checks = $vendor.Checks; Repository = $vendor.Repository
+        Offers = @($offers); ExcludedOffers = @($excludedOffers); WindowsUpdateOfferCount = $offerCount
+        WindowsUpdateOK = $wuOk; Checks = $vendor.Checks; Repository = $vendor.Repository
     }
 }
 
