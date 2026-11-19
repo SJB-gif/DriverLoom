@@ -17,8 +17,13 @@ jobs:
       - name: Install stock NSIS 3.11
         shell: powershell
         run: |
-          choco upgrade nsis --version=3.11 --allow-downgrade --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed.' }
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco upgrade nsis --version=3.11 --allow-downgrade --yes --no-progress
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 3) { throw 'NSIS installation failed after three attempts.' }
+            Write-Warning "NSIS download failed. Retrying in $($attempt * 15) seconds."
+            Start-Sleep -Seconds ($attempt * 15)
+          }
       - name: Test and build the single-file installer
         shell: powershell
         run: .\Build.ps1 -MakeNSIS "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
