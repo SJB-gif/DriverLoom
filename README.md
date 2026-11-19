@@ -26,7 +26,15 @@ Open the gear for Settings, About and Help. Double-click a device for details.
 
 Automatic installation supports eligible **Windows Update drivers only**. Manufacturer packages require manual installation. Coverage varies by device; see the [coverage guide](docs/COVERAGE.md). DriverLoom does not flash firmware or restart your PC automatically.
 
-Inventory and preferences are stored locally in `%LOCALAPPDATA%\HardwareUpdateLauncher`. Checks contact Windows Update, manufacturer sources and an optional public GitHub catalog.
+## Privacy
+
+DriverLoom requires no account and contains no analytics, advertising or usage tracking.
+
+- **Local data:** hardware inventory, preferences, saved sources and diagnostic logs are stored on your PC in `%LOCALAPPDATA%\HardwareUpdateLauncher`. DriverLoom does not automatically upload these files.
+- **Update checks:** opening the app starts checks with Windows Update and manufacturer sites. Some manufacturer lookups include hardware-model and Windows-version details.
+- **Optional GitHub access:** catalog and release metadata are fetched only if you configure a repository. Opening a vendor or repository link visits that site in your browser.
+
+External services can see normal connection information, including your connection's public IP address, and apply their own privacy policies. Windows Update's data handling is governed by Windows and Microsoft.
 
 ## Build from source
 
