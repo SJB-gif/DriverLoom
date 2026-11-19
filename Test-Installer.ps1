@@ -201,11 +201,12 @@ try {
     Assert-Installer 'DriverLoom' $wow64Result.NativeProcess 'finish-page launch uses native app'
     Assert-Installer $true $wow64Result.Visible 'finish-page command shows the form'
 
-    # Launch the installed, unmodified Start menu shortcut twice; never request driver installation.
+    # Exercise the installed shortcut, then use a direct native launch for isolated tray preferences.
     foreach ($attempt in 1, 2) {
         $savedPreferences=[IO.File]::ReadAllBytes($settingsPath)
         if($attempt -eq 2){Save-Json $settingsPath @{Repo='';Bios=$false;Sources=@();CheckFrequency='Manual';CheckAppUpdates=$false;KeepRunningInTray=$true}}
-        $launchProcess = Start-Process -FilePath $shortcutPath -WindowStyle Hidden -PassThru
+        $launchPath=if($attempt -eq 2){Join-Path $installRoot 'DriverLoom.exe'}else{$shortcutPath}
+        $launchProcess = Start-Process -FilePath $launchPath -WindowStyle Hidden -PassThru
         $deadline = [datetime]::UtcNow.AddSeconds(25)
         do {
             Start-Sleep -Milliseconds 200

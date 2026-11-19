@@ -41,6 +41,11 @@ public static class DriverLoomSetupBridge
         }
         return command.IndexOf("Install-DriverOffers", StringComparison.OrdinalIgnoreCase) >= 0;
     }
+    public static string ExitEventName(string root)
+    {
+        using (System.Security.Cryptography.SHA256 hash = System.Security.Cryptography.SHA256.Create())
+            return @"Local\DriverLoom.ExitForSetup." + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(InstallerPath(root).ToUpperInvariant()))).Replace("-", "").Substring(0, 32);
+    }
     static bool MutexExists(string name)
     {
         Mutex mutex;
@@ -98,7 +103,7 @@ public static class DriverLoomSetupBridge
             EventWaitHandle exit;
             try
             {
-                exit = EventWaitHandle.OpenExisting(@"Local\DriverLoom.ExitForSetup");
+                exit = EventWaitHandle.OpenExisting(ExitEventName(root));
                 using (exit) exit.Set();
                 // The app can refuse while installing drivers or while settings need attention. Never force it.
                 return AllExited(matches, 12000) ? 0 : 2;

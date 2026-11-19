@@ -31,7 +31,7 @@ if (!$acquired) {
 }
 $restoreName=if($SmokeTest){'Local\DriverLoom.RestoreTest-'+[guid]::NewGuid().ToString('N')}else{'Local\DriverLoom.ShowWindow'}
 $restoreEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::AutoReset,$restoreName)
-$exitName=if($SmokeTest){'Local\DriverLoom.ExitTest-'+[guid]::NewGuid().ToString('N')}else{'Local\DriverLoom.ExitForSetup'}
+$exitName=if($SmokeTest){'Local\DriverLoom.ExitTest-'+[guid]::NewGuid().ToString('N')}else{Get-SetupExitName $PSScriptRoot}
 $exitEvent=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::AutoReset,$exitName)
 
 $directory = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'

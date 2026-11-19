@@ -1,3 +1,10 @@
+function Get-SetupExitName([string]$root) {
+    $target=[IO.Path]::Combine([IO.Path]::GetFullPath($root).TrimEnd('\'),'DriverLoom.exe').ToUpperInvariant()
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try{$suffix=[BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($target))).Replace('-','').Substring(0,32)}finally{$hash.Dispose()}
+    return 'Local\DriverLoom.ExitForSetup.'+$suffix
+}
+
 function Initialize-LifecyclePreferences($preferences) {
     $defaults=@{CheckFrequency='On opening';KeepRunningInTray=$false;StartWithWindows=$false;CheckAppUpdates=$true}
     foreach($name in $defaults.Keys){
