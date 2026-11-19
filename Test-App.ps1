@@ -127,6 +127,28 @@ try {
     Assert-Startup $true ($system.ResolvedTheme -in 'Dark','Light') 'system appearance resolves to a supported palette'
     if($light.Background -eq $cached.Background){throw 'Dark and light theme backgrounds did not change.'}
 
+    $equal=New-HardwareRow 'GPU driver' 'Example' 'Zeta current GPU' '' '' '2.0' @()
+    $higher=New-HardwareRow 'Audio/video driver' 'Example' 'Alpha installed newer' '' '' '3.0' @()
+    $failed=New-HardwareRow 'Network driver' 'Example' 'Failed network check' '' '' '1.0' @()
+    $ambiguous=New-HardwareRow 'Storage firmware' 'Example' 'Ambiguous firmware' '' '' 'A12' @()
+    $listSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($equal,$higher,$failed,$ambiguous);Offers=@();ExcludedOffers=@();Warnings=@();Checks=@(
+        [pscustomobject]@{Key=$equal.Key;Current=$equal.Current;Available='2.0';Status='Current at source';Checked=$true;Detail='Fixture current version.';Url='https://example.com/current'},
+        [pscustomobject]@{Key=$higher.Key;Current=$higher.Current;Available='2.0';Status='Installed version is higher';Checked=$true;Detail='The installed version exceeds the checked source.';Url='https://example.com/older'},
+        [pscustomobject]@{Key=$failed.Key;Current=$failed.Current;Available='';Status='Unsupported automatic check; source unavailable';Checked=$false;Detail='Fixture source is temporarily unavailable.';Url='https://example.com/network'},
+        [pscustomobject]@{Key=$ambiguous.Key;Current=$ambiguous.Current;Available='A13';Status='Different version; verify vendor ordering';Checked=$true;Detail='Version ordering is not established.';Url='https://example.com/firmware'}
+    )}
+    $list=Invoke-StartupCase 'list-statuses' $listSnapshot $false
+    Assert-Startup 'Alpha installed newer|Ambiguous firmware|Failed network check|Zeta current GPU' ($list.MainDevices -join '|') 'main list opens in Device A-Z order'
+    foreach($name in $equal.Model,$higher.Model){
+        $item=$list.MainItems|Where-Object Device -eq $name
+        Assert-Startup 'UP TO DATE' $item.Status "$name remains visible and green"
+        Assert-Startup 'Vendor details' $item.Action "$name retains secondary vendor details"
+        Assert-Startup $true ([bool]$item.Url) "$name retains its source link"
+    }
+    Assert-Startup 'Installed version is higher' ($list.MainItems|Where-Object Device -eq $higher.Model).Comparison 'installed-newer explanation remains in device details'
+    foreach($name in $failed.Model,$ambiguous.Model){Assert-Startup 'CHECK UNAVAILABLE' ($list.MainItems|Where-Object Device -eq $name).Status "$name cannot imply a successful comparison"}
+    Assert-Startup $false $list.FreshActionVisible 'current, failed and ambiguous checks never create an update action'
+
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'
     [void][IO.Directory]::CreateDirectory($broken)

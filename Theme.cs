@@ -255,7 +255,64 @@ namespace DriverLoom.UI
     public class DeviceGrid : DataGridView
     {
         public bool Decorated { get; set; }
+        string hardwareSortColumn = "Device";
+        bool deviceDescending;
+        public string HardwareSortColumn { get { return hardwareSortColumn; } }
         public DeviceGrid() { DoubleBuffered = true; }
+        public void ConfigureHardwareSorting()
+        {
+            foreach (DataGridViewColumn column in Columns)
+                column.SortMode = column.Name == "Device" || column.Name == "Status" ? DataGridViewColumnSortMode.Programmatic : DataGridViewColumnSortMode.NotSortable;
+        }
+        public void SortHardwareBy(string column)
+        {
+            if (!Decorated || (column != "Device" && column != "Status")) return;
+            deviceDescending = column == "Device" && hardwareSortColumn == "Device" && !deviceDescending;
+            hardwareSortColumn = column;
+            ApplyHardwareSort();
+        }
+        public void ApplyHardwareSort()
+        {
+            if (!Decorated) return;
+            if (Rows.Count > 1) Sort(new HardwareRowComparer(hardwareSortColumn, deviceDescending));
+            foreach (DataGridViewColumn column in Columns) column.HeaderCell.SortGlyphDirection = SortOrder.None;
+            Columns[hardwareSortColumn].HeaderCell.SortGlyphDirection = deviceDescending ? SortOrder.Descending : SortOrder.Ascending;
+        }
+        protected override void OnColumnHeaderMouseClick(DataGridViewCellMouseEventArgs e)
+        {
+            base.OnColumnHeaderMouseClick(e);
+            if (Decorated && e.ColumnIndex >= 0 && e.Button == MouseButtons.Left) SortHardwareBy(Columns[e.ColumnIndex].Name);
+        }
+        sealed class HardwareRowComparer : System.Collections.IComparer
+        {
+            readonly string column;
+            readonly bool descending;
+            public HardwareRowComparer(string column, bool descending) { this.column = column; this.descending = descending; }
+            static int StatusRank(DataGridViewRow row)
+            {
+                string status = Convert.ToString(row.Cells["Status"].Value);
+                if (status == "UPDATE AVAILABLE" || status == "READY TO INSTALL") return 0;
+                if (status == "UP TO DATE") return 1;
+                if (Convert.ToString(row.Cells["Status"].Tag) == "UpdateMethod") return 2;
+                return 3;
+            }
+            public int Compare(object x, object y)
+            {
+                DataGridViewRow left = (DataGridViewRow)x, right = (DataGridViewRow)y;
+                if (column == "Status")
+                {
+                    int rank = StatusRank(left).CompareTo(StatusRank(right));
+                    if (rank != 0) return rank;
+                    if (StatusRank(left) == 2)
+                    {
+                        int app = StringComparer.OrdinalIgnoreCase.Compare(Convert.ToString(left.Cells["Status"].Value), Convert.ToString(right.Cells["Status"].Value));
+                        if (app != 0) return app;
+                    }
+                }
+                int name = StringComparer.OrdinalIgnoreCase.Compare(Convert.ToString(left.Cells["Device"].Value), Convert.ToString(right.Cells["Device"].Value));
+                return column == "Device" && descending ? -name : name;
+            }
+        }
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);

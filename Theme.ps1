@@ -12,11 +12,11 @@ function Get-DisplayStatus([string]$status, [string]$manager = '') {
     switch ($status) {
         'Newer at source' { 'UPDATE AVAILABLE' }
         'Current at source' { 'UP TO DATE' }
-        'Installed version is higher' { 'INSTALLED IS NEWER' }
+        'Installed version is higher' { 'UP TO DATE' }
         'Unsupported' { 'UNSUPPORTED' }
         'Managed by software' { if($manager){$manager}else{'MANUAL CHECK'} }
         'Manual check required' { if($manager){$manager}else{'MANUAL CHECK'} }
-        default { 'PACKAGE DETAILS' }
+        default { 'CHECK UNAVAILABLE' }
     }
 }
 

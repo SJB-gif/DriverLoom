@@ -176,10 +176,7 @@ function Refresh-View {
     if (!$script:snapshot) { return }
     $checks = @{}
     foreach ($check in @($script:snapshot.Checks)) { if ($check) { $checks["$($check.Key)|$($check.Current)"] = $check } }
-    $orderedInventory = @($script:snapshot.Inventory | Sort-Object @{ Expression = {
-        $itemCheck = $checks["$($_.Key)|$($_.Current)"]
-        if ($itemCheck.Status -eq 'Newer at source') { 0 } elseif ($itemCheck.Checked) { 1 } else { 2 }
-    } }, Kind, Model)
+    $orderedInventory = @($script:snapshot.Inventory)
     $hiddenWindows = 0
     $unsupported = [System.Collections.Generic.List[object]]::new()
     foreach ($row in $orderedInventory) {
@@ -188,6 +185,7 @@ function Refresh-View {
         $mode = Get-CoverageMode $row $check
         if ($mode -eq 'Windows') { $hiddenWindows++; continue }
         if ($mode -in 'Identity', 'Package component') { continue }
+        if($mode -eq 'Unsupported' -and ($check.Status -like 'Source check failed:*' -or $check.Status -like '*source unavailable*')){$mode='Unavailable'}
         if ($mode -eq 'Unsupported') {
             $route = Get-OfficialSupportRoute $row $script:snapshot.Inventory
             $method=Get-UpdateMethod $row $script:snapshot.Inventory $route
@@ -217,6 +215,7 @@ function Refresh-View {
         $hardware.Rows[$i].Cells['Device'].Tag='Microsoft  /  Windows Update'
         $hardware.Rows[$i].Cells['Device'].ToolTipText=$offer.Title
     }
+    $hardware.ApplyHardwareSort()
     Update-Footer
 
 
@@ -676,6 +675,7 @@ $hardware=New-Grid ([ordered]@{Device=220;Installed=76;Available=76;Status=130;S
 $hardware.Decorated=$true;$hardware.RowTemplate.Height=70;$hardware.Columns['Status'].DisplayIndex=1
 $hardware.Columns['Installed'].DefaultCellStyle.Font=[Drawing.Font]::new('Consolas',10);$hardware.Columns['Available'].DefaultCellStyle.Font=[Drawing.Font]::new('Consolas',10)
 $hardware.Columns.Remove('Source');$sourceColumn=[Windows.Forms.DataGridViewButtonColumn]::new();$sourceColumn.FlatStyle='Flat';$sourceColumn.Name='Source';$sourceColumn.HeaderText='ACTION';$sourceColumn.FillWeight=96;[void]$hardware.Columns.Add($sourceColumn)
+$hardware.ConfigureHardwareSorting()
 $hardware.DefaultCellStyle.WrapMode='False';$hardware.AutoSizeRowsMode='None';$layout.Controls.Add($hardware,0,1)
 $footer=[Windows.Forms.TableLayoutPanel]::new();$footer.Dock='Bottom';$footer.Height=36;$footer.ColumnCount=2;$footer.RowCount=1;$footer.Padding=[Windows.Forms.Padding]::new(22,0,15,0)
 [void]$footer.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$footer.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',34))
@@ -723,6 +723,8 @@ $form.Add_Shown({
     if ($SmokeTest) {
         if ($env:HARDWARE_LAUNCHER_TEST_PREVIEW) {
             Save-FormPreview $form 'hardware'
+            $hardware.SortHardwareBy('Status');Save-FormPreview $form 'hardware-status'
+            $hardware.SortHardwareBy('Device')
             Edit-Settings -Preview
             Show-UnsupportedItems -Preview
             Show-WindowsExclusions -Preview
@@ -751,6 +753,7 @@ $form.Add_Shown({
             WindowsManagedHidden = $script:hiddenWindowsCount
             MainDevices = @($hardware.Rows | ForEach-Object { $_.Cells[0].Value })
             MainStatuses = @($hardware.Rows | ForEach-Object { $_.Cells['Status'].Value })
+            MainItems = @($hardware.Rows | ForEach-Object { [pscustomobject]@{Device=$_.Cells['Device'].Value;Status=$_.Cells['Status'].Value;Action=$_.Cells['Source'].Value;Url=$_.Tag.Url;Comparison=$_.Tag.Check.Status} })
             SettingsProbe = $null
             MainButtonCount = 1
             MainActionText = $primary.Text

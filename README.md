@@ -6,7 +6,7 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
-**Latest source/test version: 0.1.12.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
+**Latest source/test version: 0.1.13.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
 
 ## Code signing policy
 
@@ -29,6 +29,10 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 - Dark, light and system themes, plus an optional BIOS/USB preparation guide.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
+
+Devices remain visible after a successful check. Green **Up to date** means the installed version matches or exceeds the checked source; **Vendor details** keeps the official link available. **Update available** identifies a newer version. Failed or ambiguous comparisons show **Check unavailable**, with the reason in device details.
+
+The list opens in **Device A–Z** order. Click Device to switch A–Z/Z–A, or Status for **updates first**, then up-to-date devices, then application names A–Z. Unavailable checks follow those groups. Installed, Available and Action do not change the sorting. Your selected order stays in place as results refresh.
 
 Enable **Show items without automatic checks** in Settings to include devices managed by other software or a manual support page. Their status names where to go: for example, **CORSAIR iCUE**, **CORSAIR SSD Toolbox** or **Microsoft Gaming Services**. Use **Open update page** for the official website. These labels do not mean an update is available. Unknown software owners are not assigned guessed download links.
 
