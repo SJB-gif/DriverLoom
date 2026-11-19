@@ -205,21 +205,27 @@ try {
     foreach ($attempt in 1, 2) {
         $savedPreferences=[IO.File]::ReadAllBytes($settingsPath)
         if($attempt -eq 2){Save-Json $settingsPath @{Repo='';Bios=$false;Sources=@();CheckFrequency='Manual';CheckAppUpdates=$false;KeepRunningInTray=$true}}
-        $launchPath=if($attempt -eq 2){Join-Path $installRoot 'DriverLoom.exe'}else{$shortcutPath}
-        $launchProcess = Start-Process -FilePath $launchPath -WindowStyle Hidden -PassThru
-        $deadline = [datetime]::UtcNow.AddSeconds(25)
-        do {
-            Start-Sleep -Milliseconds 200
-            $launchProcess.Refresh()
-        } while (!$launchProcess.HasExited -and $launchProcess.MainWindowTitle -ne "DriverLoom $script:LauncherVersion" -and [datetime]::UtcNow -lt $deadline)
-        Assert-Installer $false $launchProcess.HasExited "shortcut launch $attempt remains running"
-        Assert-Installer "DriverLoom $script:LauncherVersion" $launchProcess.MainWindowTitle "shortcut launch $attempt shows app window"
-        Assert-Installer $true $launchProcess.Responding "shortcut launch $attempt responds"
         if($attempt -eq 2){
-            [void]$launchProcess.CloseMainWindow()
+            $trayProbe=(Invoke-InstalledHost @('-SmokeTest','-Background'))|ConvertFrom-Json
+            Assert-Installer $true $trayProbe.BackgroundStartsHidden 'installed background launch honours isolated tray preferences'
+            $launchProcess=Start-Process -FilePath (Join-Path $installRoot 'DriverLoom.exe') -WindowStyle Hidden -ArgumentList '-Background' -RedirectStandardOutput (Join-Path $testRoot 'tray-output.txt') -RedirectStandardError (Join-Path $testRoot 'tray-error.txt') -PassThru
+            $deadline=[DateTime]::UtcNow.AddSeconds(25);$ready=$false
+            do{
+                Start-Sleep -Milliseconds 100;$launchProcess.Refresh()
+                try{$signal=[Threading.EventWaitHandle]::OpenExisting((Get-SetupExitName $installRoot));$signal.Dispose();$ready=$true}catch [Threading.WaitHandleCannotBeOpenedException]{}
+            }while(!$launchProcess.HasExited -and !$ready -and [DateTime]::UtcNow -lt $deadline)
+            Assert-Installer $true $ready 'background app creates its installation-scoped exit signal'
             Start-Sleep -Milliseconds 800
             $launchProcess.Refresh()
-            Assert-Installer $false $launchProcess.HasExited 'tray close keeps the app alive before upgrading'
+            Assert-Installer $false $launchProcess.HasExited 'background tray app remains running before upgrading'
+            Assert-Installer '' $launchProcess.MainWindowTitle 'background startup keeps the main window hidden'
+        }else{
+            $launchProcess=Start-Process -FilePath $shortcutPath -WindowStyle Hidden -PassThru
+            $deadline=[DateTime]::UtcNow.AddSeconds(25)
+            do{Start-Sleep -Milliseconds 200;$launchProcess.Refresh()}while(!$launchProcess.HasExited -and $launchProcess.MainWindowTitle -ne "DriverLoom $script:LauncherVersion" -and [DateTime]::UtcNow -lt $deadline)
+            Assert-Installer $false $launchProcess.HasExited 'shortcut launch remains running'
+            Assert-Installer "DriverLoom $script:LauncherVersion" $launchProcess.MainWindowTitle 'shortcut launch shows the app window'
+            Assert-Installer $true $launchProcess.Responding 'shortcut launch responds'
         }
         [IO.File]::WriteAllBytes($settingsPath,$savedPreferences)
         if($attempt -eq 1){
