@@ -98,4 +98,17 @@ try {
 } finally {
     if ([IO.File]::Exists($temp)) { [IO.File]::Delete($temp) }
 }
+$actionSnapshot=[pscustomobject]@{WindowsUpdateOK=$true;Offers=@();Checks=@()}
+Assert-Equal $false (Get-UpdateAction $actionSnapshot $true $false).Visible 'no updates hides Update All'
+$actionSnapshot.Checks=@([pscustomobject]@{Checked=$true;Status='Newer at source'})
+Assert-Equal $true (Get-UpdateAction $actionSnapshot $true $false).Visible 'manufacturer-only updates have review action'
+Assert-Equal $false (Test-CanInstallSnapshot $actionSnapshot $true $false) 'manufacturer review never enables Windows installation'
+Assert-Equal $false (Get-UpdateAction $actionSnapshot $false $false).Visible 'saved updates cannot start a new install'
+Assert-Equal $false (Get-UpdateAction $actionSnapshot $true $true).Enabled 'busy action cannot run'
+$actionSnapshot.Checks=@();$actionSnapshot.Offers=@([pscustomobject]@{Title='Fixture'})
+Assert-Equal $true (Get-UpdateAction $actionSnapshot $true $false).Enabled 'eligible fresh Windows offer reveals update action'
+$actionSnapshot.WindowsUpdateOK=$false
+Assert-Equal $false (Get-UpdateAction $actionSnapshot $true $false).Visible 'failed Windows scan cannot offer an installation'
+Assert-Equal 'CHECKED 2 MIN AGO' (Get-CheckCaption '2026-11-19T13:00:00+11:00' ([datetimeoffset]'2026-11-19T02:02:12Z')) 'footer age handles local timezone'
+Assert-Equal 'NOT CHECKED YET' (Get-CheckCaption 'invalid') 'invalid date never claims a recent check'
 Write-Output 'PowerShell parsed and engine checks passed.'

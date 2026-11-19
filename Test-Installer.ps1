@@ -33,6 +33,14 @@ function Wait-TestProcess($process) {
     $process.Dispose()
 }
 
+function Invoke-InstalledHost([string[]]$arguments) {
+    $output=Join-Path $testRoot ('host-output-'+[guid]::NewGuid().ToString('N')+'.txt')
+    $errors=$output+'.err'
+    $process=Start-Process -FilePath (Join-Path $installRoot 'DriverLoom.exe') -WindowStyle Hidden -ArgumentList $arguments -PassThru -RedirectStandardOutput $output -RedirectStandardError $errors
+    Wait-TestProcess $process
+    return [IO.File]::ReadAllText($output,[Text.Encoding]::UTF8).Trim()
+}
+
 function Invoke-TestUninstall {
     $uninstaller = Join-Path $installRoot 'Uninstall.exe'
     if (Test-Path -LiteralPath $uninstaller) {
@@ -71,32 +79,34 @@ try {
     Assert-Installer $false (Test-Path -LiteralPath $legacyShortcutPath) 'legacy shortcut replaced during upgrade'
     Assert-Installer $script:LauncherVersion $registration.DisplayVersion 'installed version'
     Assert-Installer $installRoot $registration.InstallLocation 'installation path with spaces'
-    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom.ico', 'assets\DriverLoom.png', 'LICENSE') {
+    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
         Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash "$name payload matches source"
     }
+    Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'dist\host\DriverLoom.exe')).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot 'DriverLoom.exe')).Hash 'native host matches build'
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     Assert-Installer ((Join-Path $installRoot 'assets\DriverLoom.ico')+',0') $shortcut.IconLocation 'branded shortcut icon'
-    Assert-Installer $true ([string]::Equals($powerShell, $shortcut.TargetPath, [StringComparison]::OrdinalIgnoreCase)) 'shortcut uses 64-bit System32 PowerShell'
-    foreach ($required in @('-STA', '-WindowStyle Hidden', ('-File "' + (Join-Path $installRoot 'Launch.ps1') + '"'))) {
-        if (!$shortcut.Arguments.Contains($required)) { throw "Shortcut is missing $required." }
-    }
+    Assert-Installer $true ([string]::Equals((Join-Path $installRoot 'DriverLoom.exe'), $shortcut.TargetPath, [StringComparison]::OrdinalIgnoreCase)) 'shortcut uses native DriverLoom executable'
+    Assert-Installer '' $shortcut.Arguments 'shortcut has no PowerShell command line'
     [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut)
     [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
-    $smoke = & $powerShell -NoProfile -STA -ExecutionPolicy Bypass -File (Join-Path $installRoot 'Launch.ps1') -SmokeTest
-    Assert-Installer 0 $LASTEXITCODE 'installed entry point exit'
-    $startup = ($smoke -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Installer 'SJB.DriverLoom' (Invoke-InstalledHost @('--read-shortcut-id',('"'+$shortcutPath+'"'))) 'installed shortcut taskbar AppID'
+    $startup = (Invoke-InstalledHost @('-SmokeTest')) | ConvertFrom-Json
     Assert-Installer $true $startup.Visible 'installed form shown'
     Assert-Installer $true $startup.Is64BitProcess 'installed application bitness'
+    Assert-Installer 'DriverLoom' $startup.NativeProcess 'taskbar executable identity'
+    Assert-Installer 'SJB.DriverLoom' $startup.NativeAppID 'taskbar process AppID'
 
     # Execute the finish-page command from a real 32-bit process (the NSIS host architecture).
     $wow64Test = Join-Path $testRoot 'finish-page-command.ps1'
-    $command = '& (Join-Path $env:WINDIR ''Sysnative\WindowsPowerShell\v1.0\powershell.exe'') -NoLogo -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File ''' + (Join-Path $installRoot 'Launch.ps1').Replace("'", "''") + ''' -SmokeTest' + "`r`nexit `$LASTEXITCODE"
+    $wow64Json=Join-Path $testRoot 'wow64-smoke.json'
+    $command = '$p=Start-Process -FilePath '''+(Join-Path $installRoot 'DriverLoom.exe').Replace("'","''")+''' -WindowStyle Hidden -ArgumentList ''-SmokeTest'' -PassThru -RedirectStandardOutput '''+$wow64Json.Replace("'","''")+''' -Wait; if($p.ExitCode -ne 0){exit $p.ExitCode}; Get-Content -LiteralPath '''+$wow64Json.Replace("'","''")+''' -Raw -Encoding UTF8'
     [IO.File]::WriteAllText($wow64Test, $command, [Text.UTF8Encoding]::new($false))
     $wow64Output = & (Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $wow64Test
     Assert-Installer 0 $LASTEXITCODE 'finish-page WOW64 launch command exit'
     $wow64Result = ($wow64Output -join [Environment]::NewLine) | ConvertFrom-Json
-    Assert-Installer $true $wow64Result.Is64BitProcess 'finish-page command reaches 64-bit PowerShell'
+    Assert-Installer $true $wow64Result.Is64BitProcess '32-bit setup reaches 64-bit native app'
+    Assert-Installer 'DriverLoom' $wow64Result.NativeProcess 'finish-page launch uses native app'
     Assert-Installer $true $wow64Result.Visible 'finish-page command shows the form'
 
     # Launch the installed, unmodified Start menu shortcut twice; never request driver installation.

@@ -2,6 +2,12 @@ param([switch]$SmokeTest)
 
 $ErrorActionPreference = 'Stop'
 try {
+    $nativeHost=Join-Path $PSScriptRoot 'DriverLoom.exe'
+    # Old pinned shortcuts may still target PowerShell. Forward them to the branded host.
+    if(!$SmokeTest -and !('DriverLoom.ShellIdentity' -as [type]) -and (Test-Path -LiteralPath $nativeHost)){
+        Start-Process -FilePath $nativeHost -WindowStyle Hidden
+        return
+    }
     if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion -lt [version]'5.1' -or ![Environment]::Is64BitProcess) {
         throw 'Use 64-bit Windows PowerShell 5.1 to open DriverLoom. Reinstall using the current installer to repair the shortcut.'
     }

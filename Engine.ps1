@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.5'
+$script:LauncherVersion = '0.1.6'
 . (Join-Path $PSScriptRoot 'Coverage.ps1')
 . (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 
@@ -151,7 +151,7 @@ function Get-HttpsUri([string]$value) {
 function Read-WebSource([string]$url, [int]$limit = 2097152) {
     $uri = Get-HttpsUri $url
     $request = [Net.HttpWebRequest]::Create($uri)
-    $request.UserAgent = 'DriverLoom/0.1.5'
+    $request.UserAgent = 'DriverLoom/0.1.6'
     $request.AllowAutoRedirect = $false
     $request.Timeout = 12000
     $request.ReadWriteTimeout = 12000
@@ -360,6 +360,24 @@ function Get-WindowsOfferReport($updates, $warnings) {
 
 function Test-CanInstallSnapshot($snapshot, [bool]$fresh, [bool]$busy) {
     return (!$busy -and $fresh -and $snapshot.WindowsUpdateOK -and @($snapshot.Offers | Where-Object { $_ }).Count -gt 0)
+}
+
+function Get-UpdateAction($snapshot, [bool]$fresh, [bool]$busy) {
+    $vendorCount=@($snapshot.Checks|Where-Object{$_.Checked -and $_.Status -eq 'Newer at source'}).Count
+    $windowsCount=if($snapshot.WindowsUpdateOK){@($snapshot.Offers|Where-Object{$_}).Count}else{0}
+    $available=$fresh -and ($vendorCount+$windowsCount) -gt 0 -and !$busy
+    [pscustomobject]@{Visible=$available;Enabled=$available;VendorCount=$vendorCount;WindowsCount=$windowsCount}
+}
+
+function Get-CheckCaption([string]$capturedAt,[datetimeoffset]$now=([datetimeoffset]::UtcNow)) {
+    $captured=[datetimeoffset]::MinValue
+    if(![datetimeoffset]::TryParse($capturedAt,[ref]$captured)){return 'NOT CHECKED YET'}
+    $minutes=[math]::Max(0,[math]::Floor(($now-$captured).TotalMinutes))
+    if($minutes -lt 1){return 'CHECKED JUST NOW'}
+    if($minutes -lt 60){return "CHECKED $minutes MIN AGO"}
+    $hours=[math]::Floor($minutes/60)
+    if($hours -lt 24){return "CHECKED $hours HR AGO"}
+    return ('CHECKED '+[math]::Floor($hours/24)+' DAYS AGO')
 }
 
 function Search-WindowsDrivers($session) {

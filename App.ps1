@@ -42,6 +42,7 @@ $script:job = $null
 $script:installer = $null
 $script:fresh = $false
 $script:applyAfterScan = $false
+$script:lastScanError = ''
 $script:unsupportedRows = @()
 $script:hiddenWindowsCount = 0
 
@@ -95,7 +96,6 @@ function Get-SelectedRow {
 
 function Refresh-View {
     $hardware.Rows.Clear()
-    $details.Text = ''
     $summary.Text = 'No saved scan. Check for updates to inspect Windows Update and manufacturer versions.'
     $script:unsupportedRows = @()
     if (!$script:snapshot) { return }
@@ -124,7 +124,7 @@ function Refresh-View {
         $hardware.Rows[$i].Tag = [pscustomobject]@{ Device=$row; Url=$check.Url; Check=$check }
         $hardware.Rows[$i].Cells['Device'].Tag=(Get-HardwareVendor $row)+'  /  '+$row.Kind
         $hardware.Rows[$i].Cells['Device'].ToolTipText=$name
-        $hardware.Rows[$i].Cells['Status'].ToolTipText=$check.Status
+        $hardware.Rows[$i].Cells['Status'].ToolTipText=$check.Status+"`r`n"+$check.Detail
         $hardware.Rows[$i].Cells['Source'].Tag='Link'
     }
     $script:unsupportedRows = $unsupported.ToArray()
@@ -137,16 +137,15 @@ function Refresh-View {
     }
     $eligibleCount = @($script:snapshot.Offers | Where-Object { $_ }).Count
     $excludedCount = @($script:snapshot.ExcludedOffers | Where-Object { $_ }).Count
-    $notes = @('Select a device for version and official source details.')
-    if (!$script:fresh) { $notes += 'Saved scan. Use Check & Update All to refresh before installing.' }
+
+
     $checkedCount = @($script:snapshot.Checks | Where-Object Checked -eq $true).Count
     $newerCount = @($script:snapshot.Checks | Where-Object Status -eq 'Newer at source').Count
     $summary.Text = "$checkedCount manufacturer checks completed. $eligibleCount Windows Update package(s) ready.`r`n$($unsupported.Count) unsupported items and $excludedCount excluded offers in Settings. $hiddenWindows Windows components hidden."
     $updateBadge.Text=if($newerCount -gt 0){"$newerCount VENDOR UPDATES"}else{'MANUFACTURER CHECKS'}
-    $scanStamp.Text=if($script:fresh){'CHECKED JUST NOW'}else{'SAVED SCAN'}
-    $notes += 'Manufacturer packages labelled Review update require manual vendor installation. The main button scans, then offers to install supported Windows Update packages.'
-    $notes += @($script:snapshot.Warnings)
-    $details.Lines = [string[]]$notes
+    Update-Footer
+
+
 }
 
 function Show-UnsupportedItems([switch]$Preview) {
@@ -267,7 +266,7 @@ function Edit-Settings([switch]$Preview) {
         $appearance.Controls.Add($radio);$themeButtons+=$radio;$themeIndex++
     }
     $updates=Add-SettingsCard $dialog 'UPDATES' 24 268 432 114
-    $updateText=[Windows.Forms.Label]::new();$updateText.Text='DriverLoom checks when it opens. The main button checks again and asks before installing eligible Windows Update drivers.';$updateText.SetBounds(18,46,394,58);$updates.Controls.Add($updateText)
+    $updateText=[Windows.Forms.Label]::new();$updateText.Text='Checks start when DriverLoom opens. Use the refresh arrow to check again. Update All appears only when a fresh check finds updates.';$updateText.SetBounds(18,46,394,58);$updates.Controls.Add($updateText)
     $firmware=Add-SettingsCard $dialog 'BIOS & FIRMWARE' 24 398 432 142
     $biosBox = New-Object Windows.Forms.CheckBox
     $biosBox.Text = 'Enable BIOS checks and the USB guide'
@@ -293,7 +292,10 @@ function Edit-Settings([switch]$Preview) {
     $save.DialogResult = 'OK'
     $cancel=New-Button 'Cancel';$cancel.SetBounds(644,566,100,36);$cancel.DialogResult='Cancel'
     $footer=[Windows.Forms.Label]::new();$footer.Text='Your preferences are saved on this PC.';$footer.Tag='Muted';$footer.SetBounds(24,575,590,25)
-    $dialog.Controls.AddRange(@($save,$cancel,$footer))
+    $aboutButton=New-Button 'About';$aboutButton.SetBounds(24,566,80,36);$aboutButton.Add_Click({Show-About})
+    $helpButton=New-Button 'Help';$helpButton.SetBounds(116,566,80,36);$helpButton.Add_Click({Show-Help})
+    $footer.Visible=$false
+    $dialog.Controls.AddRange(@($save,$cancel,$footer,$aboutButton,$helpButton))
     $dialog.AcceptButton = $save
     $dialog.CancelButton=$cancel
     if($Preview){$dialog.Add_Shown({Save-FormPreview $dialog 'settings';$dialog.Close()})}
@@ -396,11 +398,10 @@ function Show-BiosGuide {
     try { [void]$dialog.ShowDialog($form) } finally { $dialog.Dispose() }
 }
 
-function Start-Scan([switch]$ApplyUpdates) {
+function Start-Scan {
     if ($script:job -or $script:installer) { return }
-    $script:applyAfterScan = [bool]$ApplyUpdates
     $script:fresh = $false
-    $status.Text = 'Checking Windows Update and official manufacturer sources...'
+    $script:lastScanError = ''
     try {
         $script:job = Start-Job -ArgumentList (Join-Path $PSScriptRoot 'Engine.ps1'), $script:settings -ScriptBlock {
             param($engine, $settings)
@@ -409,15 +410,72 @@ function Start-Scan([switch]$ApplyUpdates) {
             . $engine
             Invoke-HardwareCheck $settings
         }
-        Update-Controls
-    } catch { $script:applyAfterScan=$false; $status.Text = "Could not start the scan. $($_.Exception.Message)" }
+    } catch { $script:lastScanError=$_.Exception.Message }
+    Update-Controls
+}
+
+function Update-Footer {
+    $caption=Get-CheckCaption $script:snapshot.CapturedAt
+    $state=if($script:job){'CHECKING'}elseif($script:installer){'UPDATING'}elseif($script:lastScanError){'CHECK FAILED - USE REFRESH'}else{$caption}
+    $status.Text=$state+'  '+[char]0x00B7+'  USING WINDOWS UPDATE & MANUFACTURER SOURCES'
+    $tooltips.SetToolTip($status,($script:lastScanError+(@($script:snapshot.Warnings)-join "`r`n")))
+    if($repoButton){$repoButton.Image=if([DriverLoom.UI.Palette]::Dark){$githubLight}else{$githubDark}}
 }
 
 function Update-Controls {
     $busy = $null -ne $script:job -or $null -ne $script:installer
-    $primary.Enabled = !$busy
-    $settingsMenu.Enabled = !$busy
-    $primary.Text = if ($script:job) { 'Checking...' } elseif ($script:installer) { 'Updating...' } else { 'Check & Update All' }
+    $action=Get-UpdateAction $script:snapshot $script:fresh $busy
+    $primary.Visible=$action.Visible -or $null -ne $script:installer
+    $primary.Enabled=$action.Enabled
+    $primary.Text=if($script:installer){'Updating...'}else{'Update All'}
+    $refresh.Enabled=!$busy
+    $settingsMenu.Enabled=!$busy
+    Update-Footer
+}
+
+function Show-UpdateReview([switch]$Preview) {
+    if(!$script:fresh){return}
+    $dialog=New-Dialog 'Available updates | DriverLoom' 490
+    $dialog.ClientSize=[Drawing.Size]::new(980,490)
+    Add-DialogHeading $dialog 'Available updates' 'Windows Update drivers can be installed together. Vendor packages require review on their official pages.'
+    $grid=New-Grid ([ordered]@{Device=210;Available=80;Method=160;Source=90})
+    $grid.DefaultCellStyle.WrapMode='True';$grid.AutoSizeRowsMode='AllCells';$grid.RowTemplate.MinimumHeight=42
+    $grid.Columns.Remove('Source')
+    $link=[Windows.Forms.DataGridViewLinkColumn]::new();$link.Name='Source';$link.HeaderText='ACTION';$link.FillWeight=90
+    $link.LinkColor=[DriverLoom.UI.Palette]::Accent;$link.ActiveLinkColor=$link.LinkColor;$link.VisitedLinkColor=$link.LinkColor
+    [void]$grid.Columns.Add($link)
+    foreach($check in @($script:snapshot.Checks|Where-Object Status -eq 'Newer at source')){
+        $device=$script:snapshot.Inventory|Where-Object Key -eq $check.Key|Select-Object -First 1
+        $i=$grid.Rows.Add(@($device.Model,$check.Available,'Manual vendor installation','Review update'))
+        $grid.Rows[$i].Tag=$check.Url
+    }
+    foreach($offer in @($script:snapshot.Offers|Where-Object{$_})){
+        [void]$grid.Rows.Add(@($offer.Title,'','Install through Windows Update','In update queue'))
+    }
+    $grid.Add_CellContentClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -eq 3 -and $sender.Rows[$eventArgs.RowIndex].Tag){Open-Link $sender.Rows[$eventArgs.RowIndex].Tag}})
+    $hostPanel=[Windows.Forms.Panel]::new();$hostPanel.SetBounds(24,104,932,310);$hostPanel.Controls.Add($grid);$dialog.Controls.Add($hostPanel)
+    $install=New-Button 'Install Windows drivers';$install.Primary=$true;$install.SetBounds(710,436,246,36);$install.DialogResult='OK'
+    $install.Enabled=Test-CanInstallSnapshot $script:snapshot $script:fresh $false
+    if(!$install.Enabled){$install.Text='Vendor review required';$install.DialogResult='None'}
+    $done=New-Button 'Done';$done.SetBounds(590,436,104,36);$done.DialogResult='Cancel'
+    $dialog.Controls.AddRange(@($install,$done));$dialog.CancelButton=$done
+    if($Preview){$dialog.Add_Shown({Save-FormPreview $dialog 'updates';$dialog.Close()})}
+    try{$result=$dialog.ShowDialog($form)}finally{$dialog.Dispose()}
+    if($result -eq 'OK'){Start-DriverInstallation}
+}
+
+function Show-DeviceDetails {
+    $selected=Get-SelectedRow
+    if($selected.Check){Show-Message ($selected.Device.Model+"`r`n`r`n"+$selected.Check.Status+"`r`n"+$selected.Check.Detail+"`r`n`r`n"+$selected.Check.Url)}
+}
+
+function Show-About {
+    $identity=@($script:snapshot.Inventory|Where-Object Kind -in 'System','Motherboard','CPU','RAM'|ForEach-Object {$_.Kind+': '+$_.Model})
+    Show-Message ("DriverLoom $script:LauncherVersion`r`nHardware updates, brought together.`r`nMIT-licensed Windows 10/11 x64 utility.`r`n`r`n"+($identity -join "`r`n"))
+}
+
+function Show-Help {
+    Show-Message "DriverLoom checks automatically when it opens. Use the refresh arrow to check again.`r`n`r`nUpdate All appears when a fresh check finds updates. It opens a review list; eligible Windows Update drivers can then be installed together. Manufacturer packages use official Review update links.`r`n`r`nDouble-click a device for source details. Unsupported items, excluded offers, About and Help are in Settings. Firmware flashing and reboots are never automatic."
 }
 
 function Start-DriverInstallation {
@@ -445,145 +503,88 @@ Install-DriverOffers ('$json' | ConvertFrom-Json)
 "@
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload))
         if ($encoded.Length -gt 29000) { throw 'Too many updates for this launcher build. Review the offers in Windows Update.' }
-        $script:installer = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-EncodedCommand', $encoded)
+        $script:installer = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-EncodedCommand', $encoded)
         $script:fresh = $false
         $status.Text = 'Installing drivers. Review the installer results when it finishes.'
         Update-Controls
     } catch { Show-Message $_.Exception.Message }
 }
 
-$form = New-Object Windows.Forms.Form
+$form = [DriverLoom.UI.MainWindow]::new()
 $form.Text = "DriverLoom $script:LauncherVersion"
 $form.Icon=[Drawing.Icon]::new((Join-Path $PSScriptRoot 'assets\DriverLoom.ico'))
-$form.Font = New-Object Drawing.Font('Segoe UI', 10)
-$form.StartPosition = 'CenterScreen'
-$form.ClientSize = New-Object Drawing.Size(1260, 830)
-$form.MinimumSize = New-Object Drawing.Size(1040, 680)
-$form.AutoScaleMode = 'Dpi'
-$header=[Windows.Forms.TableLayoutPanel]::new();$header.Dock='Top';$header.Height=78;$header.ColumnCount=3;$header.RowCount=1;$header.Padding=[Windows.Forms.Padding]::new(24,10,24,8)
-[void]$header.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent',100))
-[void]$header.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',60));[void]$header.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$header.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',292))
-$logo=[Windows.Forms.PictureBox]::new();$logo.Image=[Drawing.Image]::FromFile((Join-Path $PSScriptRoot 'assets\DriverLoom.png'));$logo.SizeMode='Zoom';$logo.Dock='Fill';$logo.Margin=[Windows.Forms.Padding]::new(0,1,12,7);$header.Controls.Add($logo,0,0)
-$brand=[Windows.Forms.Panel]::new();$brand.Dock='Fill'
-$brandName=[Windows.Forms.Label]::new();$brandName.Text='DriverLoom';$brandName.Font=[Drawing.Font]::new('Segoe UI',20,[Drawing.FontStyle]::Bold);$brandName.SetBounds(0,0,320,36)
-$brandNote=[Windows.Forms.Label]::new();$brandNote.Text='DRIVERS & FIRMWARE';$brandNote.Tag='Muted';$brandNote.Font=[Drawing.Font]::new('Consolas',9,[Drawing.FontStyle]::Bold);$brandNote.SetBounds(2,38,320,20)
-$brand.Controls.AddRange(@($brandName,$brandNote));$header.Controls.Add($brand,1,0)
-$navigation=[Windows.Forms.FlowLayoutPanel]::new();$navigation.Dock='Fill';$navigation.Padding=[Windows.Forms.Padding]::new(0,10,0,0);$navigation.WrapContents=$false
-$settingsMenu=New-Button 'Settings';$aboutItem=New-Button 'About';$helpItem=New-Button 'Help'
-foreach($item in @($settingsMenu,$aboutItem,$helpItem)){$item.AutoSize=$false;$item.Size=[Drawing.Size]::new(88,34);$item.Margin=[Windows.Forms.Padding]::new(4,0,0,0);$navigation.Controls.Add($item)}
-$header.Controls.Add($navigation,2,0)
-$header.Add_Paint({param($sender,$eventArgs)$pen=[Drawing.Pen]::new([DriverLoom.UI.Palette]::Border);try{$eventArgs.Graphics.DrawLine($pen,0,$sender.Height-1,$sender.Width,$sender.Height-1)}finally{$pen.Dispose()}})
-
-$layout = New-Object Windows.Forms.TableLayoutPanel
-$layout.Dock = 'Fill'
-$layout.ColumnCount = 1; $layout.RowCount = 5
-$layout.Padding = New-Object Windows.Forms.Padding(24, 8, 24, 10)
-[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 86))
-[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 60))
-[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent', 100))
-[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 103))
-[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 30))
+$form.Font=[Drawing.Font]::new('Segoe UI',10)
+$form.StartPosition='CenterScreen';$form.ClientSize=[Drawing.Size]::new(1240,850);$form.MinimumSize=[Drawing.Size]::new(1040,660);$form.AutoScaleMode='Dpi'
+$tooltips=[Windows.Forms.ToolTip]::new()
+$header=[DriverLoom.UI.TitleBar]::new();$header.Dock='Top'
+$header.Artwork=[Drawing.Image]::FromFile((Join-Path $PSScriptRoot 'assets\DriverLoom-brand.png'))
+$chrome=[Windows.Forms.FlowLayoutPanel]::new();$chrome.Dock='Right';$chrome.Width=196;$chrome.WrapContents=$false;$chrome.Margin=[Windows.Forms.Padding]::new(0)
+$settingsMenu=[DriverLoom.UI.IconButton]::new();$settingsMenu.Glyph='Settings';$settingsMenu.AccessibleName='Settings'
+$minimize=[DriverLoom.UI.IconButton]::new();$minimize.Glyph='Minimize';$minimize.AccessibleName='Minimize'
+$maximize=[DriverLoom.UI.IconButton]::new();$maximize.Glyph='Maximize';$maximize.AccessibleName='Maximize or restore'
+$close=[DriverLoom.UI.IconButton]::new();$close.Glyph='Close';$close.AccessibleName='Close'
+foreach($button in @($settingsMenu,$minimize,$maximize,$close)){$button.Chrome=$true;$button.Size=[Drawing.Size]::new(48,55);$button.Margin=[Windows.Forms.Padding]::new(0);$chrome.Controls.Add($button);$tooltips.SetToolTip($button,$button.AccessibleName)}
+$header.Controls.Add($chrome)
+$minimize.Add_Click({$form.WindowState='Minimized'})
+$maximize.Add_Click({$form.WindowState=if($form.WindowState -eq 'Maximized'){'Normal'}else{'Maximized'}})
+$close.Add_Click({$form.Close()})
+$layout=[Windows.Forms.TableLayoutPanel]::new();$layout.Dock='Fill';$layout.ColumnCount=1;$layout.RowCount=3;$layout.Padding=[Windows.Forms.Padding]::new(24,10,24,0)
+[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute',66));[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute',50));[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent',100))
 $form.Controls.Add($layout)
-$toolbar=[Windows.Forms.TableLayoutPanel]::new();$toolbar.Dock='Fill';$toolbar.ColumnCount=2;$toolbar.RowCount=1
-[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',235))
-$intro=[Windows.Forms.Panel]::new();$intro.Dock='Fill'
-$title=[Windows.Forms.Label]::new();$title.Text='Your hardware';$title.Font=[Drawing.Font]::new('Segoe UI',19,[Drawing.FontStyle]::Bold);$title.SetBounds(0,12,600,38)
-$subtitle=[Windows.Forms.Label]::new();$subtitle.Text='Official sources. Clear results. One place to check.';$subtitle.Tag='Muted';$subtitle.SetBounds(2,53,660,26);$intro.Controls.AddRange(@($title,$subtitle));$toolbar.Controls.Add($intro,0,0)
-$actions = New-Object Windows.Forms.FlowLayoutPanel
-$actions.Dock = 'Fill'; $actions.WrapContents = $false; $actions.AutoScroll = $false;$actions.Padding=[Windows.Forms.Padding]::new(0,21,0,0)
-$primary = New-Button 'Check & Update All'
-$primary.Primary=$true;$primary.AutoSize=$false;$primary.Size=[Drawing.Size]::new(228,42)
-$primary.Font=[Drawing.Font]::new('Segoe UI',10,[Drawing.FontStyle]::Bold)
-$actions.Controls.Add($primary)
+$toolbar=[Windows.Forms.TableLayoutPanel]::new();$toolbar.Dock='Fill';$toolbar.ColumnCount=3;$toolbar.RowCount=1
+[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',42));[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',168))
+$refresh=[DriverLoom.UI.IconButton]::new();$refresh.Glyph='Refresh';$refresh.AccessibleName='Check for updates';$refresh.Size=[Drawing.Size]::new(32,36);$refresh.Margin=[Windows.Forms.Padding]::new(0,12,0,0);$toolbar.Controls.Add($refresh,0,0);$tooltips.SetToolTip($refresh,'Check for updates')
+$title=[Windows.Forms.Label]::new();$title.Text='Your hardware';$title.Font=[Drawing.Font]::new('Segoe UI',18,[Drawing.FontStyle]::Bold);$title.Dock='Fill';$title.TextAlign='MiddleLeft';$toolbar.Controls.Add($title,1,0)
+$primary=New-Button 'Update All';$primary.Primary=$true;$primary.AutoSize=$false;$primary.Size=[Drawing.Size]::new(162,36);$primary.Margin=[Windows.Forms.Padding]::new(0,14,0,0);$toolbar.Controls.Add($primary,2,0)
 $form.AcceptButton=$primary
-$toolbar.Controls.Add($actions,1,0);$layout.Controls.Add($toolbar,0,0)
+$layout.Controls.Add($toolbar,0,0)
 $summaryPanel=[Windows.Forms.TableLayoutPanel]::new();$summaryPanel.Dock='Fill';$summaryPanel.ColumnCount=2
-[void]$summaryPanel.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$summaryPanel.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',280))
-$summary = New-Object Windows.Forms.Label
-$summary.Dock = 'Fill';$summary.Tag='Muted';$summary.AutoEllipsis = $true;$summary.TextAlign='MiddleLeft'
-$summaryPanel.Controls.Add($summary,0,0)
-$updateBadge=[Windows.Forms.Label]::new();$updateBadge.Text='READY TO CHECK';$updateBadge.Tag='Accent';$updateBadge.Font=[Drawing.Font]::new('Consolas',10,[Drawing.FontStyle]::Bold);$updateBadge.Dock='Fill';$updateBadge.TextAlign='MiddleRight';$summaryPanel.Controls.Add($updateBadge,1,0)
+[void]$summaryPanel.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$summaryPanel.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',220))
+$summary=[Windows.Forms.Label]::new();$summary.Dock='Fill';$summary.Tag='Muted';$summary.AutoEllipsis=$true;$summary.TextAlign='MiddleLeft';$summaryPanel.Controls.Add($summary,0,0)
+$updateBadge=[Windows.Forms.Label]::new();$updateBadge.Text='AUTOMATIC CHECK';$updateBadge.Tag='Accent';$updateBadge.Font=[Drawing.Font]::new('Consolas',9,[Drawing.FontStyle]::Bold);$updateBadge.Dock='Fill';$updateBadge.TextAlign='MiddleRight';$summaryPanel.Controls.Add($updateBadge,1,0)
 $layout.Controls.Add($summaryPanel,0,1)
+$hardware=New-Grid ([ordered]@{Device=220;Installed=76;Available=76;Status=130;Source=96})
+$hardware.Decorated=$true;$hardware.RowTemplate.Height=70;$hardware.Columns['Status'].DisplayIndex=1
+$hardware.Columns['Installed'].DefaultCellStyle.Font=[Drawing.Font]::new('Consolas',10);$hardware.Columns['Available'].DefaultCellStyle.Font=[Drawing.Font]::new('Consolas',10)
+$hardware.Columns.Remove('Source');$sourceColumn=[Windows.Forms.DataGridViewButtonColumn]::new();$sourceColumn.FlatStyle='Flat';$sourceColumn.Name='Source';$sourceColumn.HeaderText='ACTION';$sourceColumn.FillWeight=96;[void]$hardware.Columns.Add($sourceColumn)
+$hardware.DefaultCellStyle.WrapMode='False';$hardware.AutoSizeRowsMode='None';$layout.Controls.Add($hardware,0,2)
+$footer=[Windows.Forms.TableLayoutPanel]::new();$footer.Dock='Bottom';$footer.Height=36;$footer.ColumnCount=2;$footer.RowCount=1;$footer.Padding=[Windows.Forms.Padding]::new(22,0,15,0)
+[void]$footer.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$footer.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',34))
+$status=[Windows.Forms.Label]::new();$status.Dock='Fill';$status.Tag='Muted';$status.AutoEllipsis=$true;$status.TextAlign='MiddleLeft';$status.Font=[Drawing.Font]::new('Consolas',8.5,[Drawing.FontStyle]::Bold);$footer.Controls.Add($status,0,0)
+$githubLight=[Drawing.Image]::FromFile((Join-Path $PSScriptRoot 'assets\GitHub-light.png'));$githubDark=[Drawing.Image]::FromFile((Join-Path $PSScriptRoot 'assets\GitHub-dark.png'))
+$repoButton=[DriverLoom.UI.IconButton]::new();$repoButton.Glyph='GitHub';$repoButton.Dock='Fill';$repoButton.AccessibleName='Open DriverLoom source on GitHub';$footer.Controls.Add($repoButton,1,0);$tooltips.SetToolTip($repoButton,'DriverLoom on GitHub')
+$footer.Add_Paint({param($sender,$eventArgs)$pen=[Drawing.Pen]::new([DriverLoom.UI.Palette]::Border);try{$eventArgs.Graphics.DrawLine($pen,0,0,$sender.Width,0)}finally{$pen.Dispose()}})
+$form.Controls.Add($footer);$form.Controls.Add($header)
+$primary.Add_Click({Show-UpdateReview})
+$refresh.Add_Click({Start-Scan})
+$repoButton.Add_Click({Open-Link 'https://github.com/SJB-gif/HardwareUpdateLauncher'})
+$settingsMenu.Add_Click({Edit-Settings;Update-Controls})
+$hardware.Add_CellContentClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -ge 0 -and $sender.Columns[$eventArgs.ColumnIndex].Name -eq 'Source'){$selected=$sender.Rows[$eventArgs.RowIndex].Tag;if($selected.Url){Open-Link $selected.Url}}})
+$hardware.Add_CellDoubleClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -ne $hardware.Columns['Source'].Index){Show-DeviceDetails}})
 
-$hardware = New-Grid ([ordered]@{ Device=220; Installed=76; Available=76; Status=130; Source=96 })
-$hardware.Decorated=$true;$hardware.RowTemplate.Height=70
-$hardware.Columns['Status'].DisplayIndex=1
-$hardware.Columns['Installed'].DefaultCellStyle.Font=[Drawing.Font]::new('Consolas',10)
-$hardware.Columns['Available'].DefaultCellStyle.Font=[Drawing.Font]::new('Consolas',10)
-$hardware.Columns.Remove('Source')
-$sourceColumn=[Windows.Forms.DataGridViewButtonColumn]::new();$sourceColumn.FlatStyle='Flat'
-$sourceColumn.Name='Source'; $sourceColumn.HeaderText='ACTION'; $sourceColumn.FillWeight=96
-[void]$hardware.Columns.Add($sourceColumn)
-$hardware.DefaultCellStyle.WrapMode='False'; $hardware.AutoSizeRowsMode='None'
-$layout.Controls.Add($hardware, 0, 2)
-
-$details = New-Object Windows.Forms.TextBox
-$details.Dock = 'Fill'; $details.ReadOnly = $true; $details.Multiline = $true; $details.ScrollBars = 'Vertical';$details.Margin=[Windows.Forms.Padding]::new(0,16,0,8)
-$layout.Controls.Add($details, 0, 3)
-$footerPanel=[Windows.Forms.TableLayoutPanel]::new();$footerPanel.Dock='Fill';$footerPanel.ColumnCount=2
-[void]$footerPanel.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$footerPanel.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',170))
-$status = New-Object Windows.Forms.Label
-$status.Dock = 'Fill';$status.Tag='Muted';$status.AutoEllipsis=$true;$status.Font=[Drawing.Font]::new('Segoe UI',9)
-$status.Text = if ($startupNotice) { $startupNotice } else { 'Ready. Use Check & Update All to refresh your hardware.' }
-$scanStamp=[Windows.Forms.Label]::new();$scanStamp.Dock='Fill';$scanStamp.Text='DRIVERLOOM '+$script:LauncherVersion;$scanStamp.TextAlign='TopRight';$scanStamp.Tag='Muted';$scanStamp.Font=[Drawing.Font]::new('Consolas',9)
-$footerPanel.Controls.Add($status,0,0);$footerPanel.Controls.Add($scanStamp,1,0);$layout.Controls.Add($footerPanel,0,4)
-$form.Controls.Add($header)
-
-$primary.Add_Click({ Start-Scan -ApplyUpdates })
-$settingsMenu.Add_Click({ Edit-Settings; Update-Controls })
-$aboutItem.Add_Click({ $identity=@($script:snapshot.Inventory|Where-Object Kind -in 'System','Motherboard','CPU','RAM'|ForEach-Object {$_.Kind+': '+$_.Model});Show-Message ("DriverLoom $script:LauncherVersion`r`nHardware updates, brought together.`r`nMIT-licensed Windows 10/11 x64 utility.`r`nSource: https://github.com/SJB-gif/HardwareUpdateLauncher`r`n`r`n"+($identity -join "`r`n")) })
-$helpItem.Add_Click({ Show-Message "Check & Update All refreshes hardware and manufacturer checks, then asks before applying supported Windows Update packages.`r`n`r`nReview update links open official manufacturer pages for packages requiring manual installation. Unsupported items and excluded Windows Update offers are listed in Settings. Windows-managed components are hidden.`r`n`r`nFirmware flashing and reboots are never performed automatically." })
-$hardware.Add_CellContentClick({
-    param($sender,$eventArgs)
-    if($eventArgs.RowIndex -ge 0 -and $sender.Columns[$eventArgs.ColumnIndex].Name -eq 'Source') {
-        $selected=$sender.Rows[$eventArgs.RowIndex].Tag
-        if($selected.Url){Open-Link $selected.Url}
-    }
-})
-$hardware.Add_SelectionChanged({
-    $selected = Get-SelectedRow
-    if ($selected -and !$script:job -and !$script:installer) {
-        $row = $selected.Device
-        $status.Text = $row.Kind + ' | ' + (Get-HardwareVendor $row)
-        if ($selected.Check) {
-            $details.Lines = [string[]]@($selected.Check.Status, $selected.Check.Detail, $selected.Check.Url)
-        }
-    }
-})
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({
     if ($script:job -and $script:job.State -in @('Completed', 'Failed', 'Stopped')) {
-        $apply = $script:applyAfterScan
-        $script:applyAfterScan=$false
         try {
-            $result = Receive-Job -Job $script:job -ErrorAction Stop
-            if (!$result -or !$result.CapturedAt) { throw 'No inventory was returned.' }
+            $result=Receive-Job -Job $script:job -ErrorAction Stop
+            if(!$result -or !$result.CapturedAt){throw 'No inventory was returned.'}
             Save-Json $inventoryPath $result
-            $script:snapshot = $result
-            $script:fresh = $true
+            $script:snapshot=$result;$script:fresh=$true
             Refresh-View
-            $eligibleCount = @($script:snapshot.Offers | Where-Object { $_ }).Count
-            $excludedCount = @($script:snapshot.ExcludedOffers | Where-Object { $_ }).Count
-            $status.Text = "Check complete. $eligibleCount supported package(s) ready; $excludedCount excluded offers are in Settings."
-        } catch { $apply=$false; $status.Text = "Scan failed. $($_.Exception.Message)" }
-        finally {
-            Remove-Job -Job $script:job -Force
-            $script:job = $null
-            Update-Controls
-        }
-        if($apply) {
-            if(Test-CanInstallSnapshot $script:snapshot $script:fresh $false){Start-DriverInstallation}
-            else {Show-Message 'No automatically installable updates were found. Manufacturer updates labelled Review update require manual installation. See Settings for unsupported items and excluded offers.'}
-        }
+        }catch{$script:lastScanError=$_.Exception.Message}
+        finally{Remove-Job -Job $script:job -Force;$script:job=$null;Update-Controls}
     }
+    Update-Footer
+
+
     if ($script:installer) {
         try { $finished = $script:installer.HasExited } catch { $finished = $true }
         if ($finished) {
             $script:installer.Dispose()
             $script:installer = $null
             Update-Controls
-            $status.Text = 'Installation process ended. Run Check for updates to refresh the inventory.'
+            Start-Scan
         }
     }
 })
@@ -607,11 +608,17 @@ $form.Add_Shown({
             UnsupportedCount = $script:unsupportedRows.Count
             WindowsManagedHidden = $script:hiddenWindowsCount
             MainDevices = @($hardware.Rows | ForEach-Object { $_.Cells[0].Value })
-            MainButtonCount = $actions.Controls.Count
+            MainButtonCount = 1
             MainActionText = $primary.Text
             MainActionUsesMnemonic = $primary.UseMnemonic
             MainActionEnabled = $primary.Enabled
-            MenuItems = @($navigation.Controls | ForEach-Object Text)
+            MenuItems = @('Settings')
+            Borderless = $form.FormBorderStyle -eq 'None'
+            MainActionVisible = $primary.Visible
+            RefreshEnabled = $refresh.Enabled
+            Footer = $status.Text
+            NativeProcess = [Diagnostics.Process]::GetCurrentProcess().ProcessName
+            NativeAppID = if('DriverLoom.ShellIdentity' -as [type]){[DriverLoom.ShellIdentity]::CurrentId()}else{''}
             ProductName = 'DriverLoom'
             WindowTitle = $form.Text
             ThemePreference = [DriverLoom.UI.Palette]::Preference
@@ -623,11 +630,17 @@ $form.Add_Shown({
             ApartmentState = [string][Threading.Thread]::CurrentThread.GetApartmentState()
             ScanStarted = $null -ne $script:job
             ApplyOnStartup = $script:applyAfterScan
+            FreshActionVisible = $false
+            FreshActionEnabled = $false
             FreshUpdateAllEnabled = $false
         }
         $script:fresh = $true
         Update-Controls
         $script:smokeResult.FreshUpdateAllEnabled = Test-CanInstallSnapshot $script:snapshot $script:fresh $false
+        $script:smokeResult.FreshActionVisible=$primary.Visible
+        $script:smokeResult.FreshActionEnabled=$primary.Enabled
+        if($env:HARDWARE_LAUNCHER_TEST_PREVIEW){Save-FormPreview $form 'checked';Show-UpdateReview -Preview}
+        if($env:DRIVERLOOM_UI_REVIEW -eq '1'){$timer.Start();return}
         $form.Close()
         return
     }
@@ -648,7 +661,8 @@ try {
     $timer.Stop()
     if ($script:job) { Remove-Job -Job $script:job -Force }
     $timer.Dispose()
-    $logo.Image.Dispose()
+    $header.Artwork.Dispose()
+    $githubLight.Dispose();$githubDark.Dispose();$tooltips.Dispose()
     $form.Dispose()
     $mutex.ReleaseMutex()
     $mutex.Dispose()

@@ -31,10 +31,13 @@ function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [strin
     Assert-Startup $false $result.ScanStarted "$name no network scan in test mode"
     Assert-Startup $false $result.ApplyOnStartup "$name startup scan cannot auto-install"
     Assert-Startup 1 $result.MainButtonCount "$name exactly one primary action"
-    Assert-Startup 'Check & Update All' $result.MainActionText "$name combined action label"
+    Assert-Startup 'Update All' $result.MainActionText "$name update action label"
     Assert-Startup $false $result.MainActionUsesMnemonic "$name ampersand remains visible"
-    Assert-Startup $true $result.MainActionEnabled "$name idle action can check even with no installable offers"
-    Assert-Startup 'Settings,About,Help' ($result.MenuItems -join ',') "$name top menu"
+    Assert-Startup $false $result.MainActionEnabled "$name cached scan cannot start updates"
+    Assert-Startup $false $result.MainActionVisible "$name updates hidden until fresh scan"
+    Assert-Startup $true $result.RefreshEnabled "$name refresh remains available"
+    Assert-Startup $true $result.Borderless "$name single title bar"
+    Assert-Startup 'Settings' ($result.MenuItems -join ',') "$name gear-only top navigation"
     Assert-Startup $false $result.UpdateAllEnabled "$name saved offers cannot be installed"
     Assert-Startup $biosEnabled $result.BiosEnabled "$name BIOS opt-in"
     return $result
@@ -44,6 +47,7 @@ try {
     $empty = Invoke-StartupCase 'empty' $null $false
     Assert-Startup 0 $empty.HardwareRows 'empty inventory'
     Assert-Startup 0 $empty.DriverRows 'empty offers'
+    Assert-Startup $false $empty.FreshActionVisible 'no updates means no Update All action'
     $snapshot = [pscustomobject]@{
         CapturedAt = '2026-11-19T00:00:00Z'; OS = 'Windows test fixture'
         Inventory = @(
@@ -65,6 +69,7 @@ try {
     Assert-Startup 1 $cached.DriverRows 'only eligible Windows Update packages are shown in main results'
     Assert-Startup 2 $cached.ExcludedDriverRows 'excluded offers remain visible'
     Assert-Startup $true $cached.FreshUpdateAllEnabled 'fresh eligible offer can enable Update All'
+    Assert-Startup $true $cached.FreshActionVisible 'fresh available updates reveal Update All'
     Assert-Startup 1 $cached.UnsupportedCount 'unsupported devices are separated into settings'
     Assert-Startup 1 $cached.WindowsManagedHidden 'Windows-managed controller removed from main results'
     Assert-Startup $false ($cached.MainDevices -contains 'Standard NVM Express Controller') 'inbox controller absent from results'
@@ -76,6 +81,7 @@ try {
     Assert-Startup 0 $excludedOnly.DriverRows 'excluded packages stay out of main results'
     Assert-Startup $false $excludedOnly.UpdateAllEnabled 'excluded offers never enable Update All'
     Assert-Startup $false $excludedOnly.FreshUpdateAllEnabled 'fresh excluded-only scan cannot enable Update All'
+    Assert-Startup $true $excludedOnly.FreshActionVisible 'manufacturer-only updates still have a review action'
     $optIn = Invoke-StartupCase 'bios-opt-in' $snapshot $true
     Assert-Startup 1 $optIn.HardwareRows 'unsupported BIOS does not add an unchecked row to main results'
     $light = Invoke-StartupCase 'light-theme' $snapshot $false 'Light'

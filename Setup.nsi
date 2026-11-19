@@ -8,10 +8,8 @@ ManifestSupportedOS Win10
 !include "x64.nsh"
 
 !define APP "DriverLoom"
-!define VERSION "0.1.5"
+!define VERSION "0.1.6"
 !define UNINSTALL "Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher"
-!define POWERSHELL "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
-!define LAUNCH_ARGS '-NoLogo -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Launch.ps1"'
 !ifndef OUTPUT_EXE
   !define OUTPUT_EXE "DriverLoom-Setup.exe"
 !endif
@@ -21,7 +19,7 @@ OutFile "${OUTPUT_EXE}"
 InstallDir "$LOCALAPPDATA\Programs\HardwareUpdateLauncher"
 ShowInstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.5.0"
+VIProductVersion "0.1.6.0"
 VIAddVersionKey "ProductName" "${APP}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${APP} Setup"
@@ -62,10 +60,9 @@ FunctionEnd
 
 Function LaunchApplication
   ClearErrors
-  # This installer is 32-bit: Sysnative reaches 64-bit PowerShell without WOW64 redirection.
-  Exec '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" ${LAUNCH_ARGS}'
+  Exec '"$INSTDIR\DriverLoom.exe"'
   ${If} ${Errors}
-    MessageBox MB_ICONSTOP|MB_OK "Setup could not open Windows PowerShell. Try the Start menu shortcut."
+    MessageBox MB_ICONSTOP|MB_OK "Setup could not open DriverLoom. Try the Start menu shortcut."
   ${EndIf}
 FunctionEnd
 
@@ -81,15 +78,21 @@ Section "Install"
   File "Theme.cs"
   File "Install.ps1"
   File "LICENSE"
+  File "assets\ATTRIBUTION.md"
+  File "dist\host\DriverLoom.exe"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   SetOutPath "$INSTDIR\assets"
   File "assets\DriverLoom.ico"
   File "assets\DriverLoom.png"
+  File "assets\DriverLoom-brand.png"
+  File "assets\GitHub-light.png"
+  File "assets\GitHub-dark.png"
   SetOutPath "$INSTDIR"
 
   # Keep the existing installation/data identity so this also upgrades pre-branding builds.
   Delete "$SMPROGRAMS\Hardware Update Launcher.lnk"
-  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "${POWERSHELL}" '${LAUNCH_ARGS}' "$INSTDIR\assets\DriverLoom.ico"
+  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\DriverLoom.exe" "" "$INSTDIR\assets\DriverLoom.ico"
+  ExecWait '"$INSTDIR\DriverLoom.exe" --shortcut-id "$SMPROGRAMS\${APP}.lnk"' $0
 
   WriteRegStr HKCU "${UNINSTALL}" "DisplayName" "${APP}"
   WriteRegStr HKCU "${UNINSTALL}" "DisplayVersion" "${VERSION}"
@@ -124,6 +127,11 @@ Section "Uninstall"
   Delete "$INSTDIR\Theme.cs"
   Delete "$INSTDIR\assets\DriverLoom.ico"
   Delete "$INSTDIR\assets\DriverLoom.png"
+  Delete "$INSTDIR\assets\DriverLoom-brand.png"
+  Delete "$INSTDIR\assets\GitHub-light.png"
+  Delete "$INSTDIR\assets\GitHub-dark.png"
+  Delete "$INSTDIR\ATTRIBUTION.md"
+  Delete "$INSTDIR\DriverLoom.exe"
   RMDir "$INSTDIR\assets"
   Delete "$INSTDIR\Install.ps1"
   Delete "$INSTDIR\LICENSE"

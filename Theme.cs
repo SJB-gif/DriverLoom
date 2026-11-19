@@ -49,6 +49,76 @@ namespace DriverLoom.UI
         }
     }
 
+    public class MainWindow : Form
+    {
+        public MainWindow() { FormBorderStyle = FormBorderStyle.None; DoubleBuffered = true; Padding = new Padding(1); }
+        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); MaximizedBounds = Screen.FromHandle(Handle).WorkingArea; }
+        protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); using (Pen pen = new Pen(Palette.Border)) e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1); }
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg == 0x84 && WindowState == FormWindowState.Normal)
+            {
+                Point p = PointToClient(new Point((short)((long)m.LParam & 65535), (short)(((long)m.LParam >> 16) & 65535)));
+                int edge = 7; bool left = p.X < edge, right = p.X >= Width - edge, top = p.Y < edge, bottom = p.Y >= Height - edge;
+                if (left || right || top || bottom) m.Result = new IntPtr(top ? (left ? 13 : right ? 14 : 12) : bottom ? (left ? 16 : right ? 17 : 15) : left ? 10 : 11);
+            }
+        }
+    }
+    public class TitleBar : Panel
+    {
+        public Image Artwork { get; set; }
+        [DllImport("user32.dll")] static extern bool ReleaseCapture();
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+        public TitleBar() { DoubleBuffered = true; Height = 56; AccessibleName = "DriverLoom title bar"; }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Color.FromArgb(13, 15, 20));
+            if (Artwork != null)
+            {
+                // Display the supplied wordmark directly from the unmodified brand sheet.
+                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                e.Graphics.DrawImage(Artwork, new Rectangle(20, 13, 208, 29), new Rectangle(204, 196, 1348, 196), GraphicsUnit.Pixel);
+            }
+            using (Pen pen = new Pen(Palette.Border)) { e.Graphics.DrawLine(pen, 246, 0, 246, Height); e.Graphics.DrawLine(pen, 0, Height - 1, Width, Height - 1); }
+            using (Font font = new Font("Consolas", 9, FontStyle.Bold)) TextRenderer.DrawText(e.Graphics, "HARDWARE UPDATES", font, new Point(266, 21), Color.FromArgb(157, 165, 175), TextFormatFlags.NoPrefix);
+        }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button == MouseButtons.Left) { ReleaseCapture(); SendMessage(FindForm().Handle, 0xA1, new IntPtr(2), IntPtr.Zero); } }
+        protected override void OnMouseDoubleClick(MouseEventArgs e) { base.OnMouseDoubleClick(e); Form f = FindForm(); f.WindowState = f.WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized; }
+    }
+    public class IconButton : Button
+    {
+        public string Glyph { get; set; }
+        public bool Chrome { get; set; }
+        bool hover;
+        public IconButton() { FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; Cursor = Cursors.Hand; TabStop = true; }
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Color bg = Chrome ? Color.FromArgb(13, 15, 20) : Palette.Background;
+            if (hover) bg = Glyph == "Close" ? Color.FromArgb(180, 38, 51) : Chrome ? Color.FromArgb(40, 45, 54) : Palette.Selected;
+            e.Graphics.Clear(bg); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Color color = !Enabled ? Palette.Muted : Chrome ? Color.FromArgb(225, 229, 236) : Palette.Muted;
+            float x = Width / 2f, y = Height / 2f;
+            using (Pen pen = new Pen(color, 1.4f))
+            {
+                if (Glyph == "Close") { e.Graphics.DrawLine(pen, x - 4, y - 4, x + 4, y + 4); e.Graphics.DrawLine(pen, x + 4, y - 4, x - 4, y + 4); }
+                else if (Glyph == "Minimize") e.Graphics.DrawLine(pen, x - 5, y, x + 5, y);
+                else if (Glyph == "Maximize") e.Graphics.DrawRectangle(pen, x - 4, y - 4, 8, 8);
+                else if (Glyph == "Settings")
+                {
+                    PointF[] points = new PointF[32];
+                    for (int i = 0; i < points.Length; i++) { double angle = i * Math.PI / 16; float radius = (i % 4 == 1 || i % 4 == 2) ? 8.3f : 6.5f; points[i] = new PointF(x + radius * (float)Math.Cos(angle), y + radius * (float)Math.Sin(angle)); }
+                    e.Graphics.DrawPolygon(pen, points); e.Graphics.DrawEllipse(pen, x - 2.5f, y - 2.5f, 5, 5);
+                }
+                else if (Glyph == "Refresh") { e.Graphics.DrawArc(pen, x - 7, y - 7, 14, 14, -80, 290); e.Graphics.DrawLines(pen, new PointF[] { new PointF(x - 1, y - 11), new PointF(x + 1, y - 6), new PointF(x - 4, y - 5) }); }
+                else if (Image != null) e.Graphics.DrawImage(Image, x - 9, y - 9, 18, 18);
+                if (Focused) { pen.Color = Palette.Accent; e.Graphics.DrawLine(pen, x - 5, Height - 4, x + 5, Height - 4); }
+            }
+        }
+    }
+
     public static class Theme
     {
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr handle, int attribute, ref int value, int size);
@@ -148,7 +218,7 @@ namespace DriverLoom.UI
             if (Decorated && Rows.Count == 0)
             {
                 Rectangle text = new Rectangle(24, ColumnHeadersHeight + 60, Math.Max(1, Width - 48), 60);
-                using (Font font = new Font("Segoe UI", 11)) TextRenderer.DrawText(e.Graphics, "Your supported hardware results will appear here.\r\nUse Check & Update All to refresh.", font, text, Palette.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                using (Font font = new Font("Segoe UI", 11)) TextRenderer.DrawText(e.Graphics, "Your supported hardware results will appear here.\r\nA check starts automatically. Use the refresh arrow to check again.", font, text, Palette.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             }
         }
         protected override void OnCellPainting(DataGridViewCellPaintingEventArgs e)
@@ -163,7 +233,7 @@ namespace DriverLoom.UI
             if (column == "Device")
             {
                 Rectangle icon = new Rectangle(bounds.X + 16, bounds.Y + (bounds.Height - 32) / 2, 32, 32);
-                DrawDevice(g, icon, Convert.ToString(Rows[e.RowIndex].Cells[e.ColumnIndex].Tag));
+                DrawDevice(g, icon, Convert.ToString(Rows[e.RowIndex].Cells[e.ColumnIndex].Tag) + " " + value);
                 Rectangle title = new Rectangle(bounds.X + 62, bounds.Y + 12, Math.Max(1, bounds.Width - 76), 25);
                 using (Font font = new Font("Segoe UI", 10, FontStyle.Bold)) TextRenderer.DrawText(g, value, font, title, Palette.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 Rectangle meta = new Rectangle(title.X, bounds.Y + 38, title.Width, 21);
@@ -203,8 +273,14 @@ namespace DriverLoom.UI
             {
                 if (kind.IndexOf("Storage", StringComparison.OrdinalIgnoreCase) >= 0)
                 { g.DrawRectangle(pen, r.X + 5, r.Y + 5, 22, 23); g.DrawLine(pen, r.X + 9, r.Y + 22, r.X + 23, r.Y + 22); g.DrawEllipse(pen, r.X + 21, r.Y + 10, 2, 2); }
-                else if (kind.IndexOf("Network", StringComparison.OrdinalIgnoreCase) >= 0)
+                else if (kind.IndexOf("Audio", StringComparison.OrdinalIgnoreCase) >= 0)
+                { g.DrawLines(pen, new Point[] { new Point(r.X+5,r.Y+13),new Point(r.X+11,r.Y+13),new Point(r.X+17,r.Y+7),new Point(r.X+17,r.Y+25),new Point(r.X+11,r.Y+19),new Point(r.X+5,r.Y+19),new Point(r.X+5,r.Y+13) }); g.DrawArc(pen,r.X+17,r.Y+9,10,14,-65,130); }
+                else if (kind.IndexOf("Wi-Fi", StringComparison.OrdinalIgnoreCase) >= 0 || kind.IndexOf("Wireless", StringComparison.OrdinalIgnoreCase) >= 0)
                 { g.DrawArc(pen, r.X + 3, r.Y + 6, 26, 23, 214, 112); g.DrawArc(pen, r.X + 9, r.Y + 12, 14, 13, 214, 112); g.DrawEllipse(pen, r.X + 15, r.Y + 23, 2, 2); }
+                else if (kind.IndexOf("Network", StringComparison.OrdinalIgnoreCase) >= 0)
+                { g.DrawRectangle(pen,r.X+5,r.Y+8,22,16);g.DrawLine(pen,r.X+10,r.Y+8,r.X+10,r.Y+14);g.DrawLine(pen,r.X+16,r.Y+8,r.X+16,r.Y+14);g.DrawLine(pen,r.X+22,r.Y+8,r.X+22,r.Y+14);g.DrawLine(pen,r.X+12,r.Y+24,r.X+12,r.Y+28);g.DrawLine(pen,r.X+20,r.Y+24,r.X+20,r.Y+28); }
+                else if (kind.IndexOf("GPU", StringComparison.OrdinalIgnoreCase) >= 0)
+                { g.DrawRectangle(pen,r.X+3,r.Y+6,26,18);g.DrawLine(pen,r.X+16,r.Y+24,r.X+16,r.Y+29);g.DrawLine(pen,r.X+10,r.Y+29,r.X+22,r.Y+29); }
                 else { g.DrawRectangle(pen, r.X + 7, r.Y + 7, 18, 18); for (int i = 11; i <= 23; i += 6) { g.DrawLine(pen, r.X + 3, r.Y + i, r.X + 7, r.Y + i); g.DrawLine(pen, r.X + 25, r.Y + i, r.X + 29, r.Y + i); g.DrawLine(pen, r.X + i, r.Y + 3, r.X + i, r.Y + 7); g.DrawLine(pen, r.X + i, r.Y + 25, r.X + i, r.Y + 29); } }
             }
             g.SmoothingMode = SmoothingMode.Default;
