@@ -17,16 +17,36 @@ jobs:
       - name: Install stock NSIS 3.11
         shell: powershell
         run: |
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            choco upgrade nsis --version=3.11 --allow-downgrade --yes --no-progress
-            if ($LASTEXITCODE -eq 0) { break }
-            if ($attempt -eq 3) { throw 'NSIS installation failed after three attempts.' }
-            Write-Warning "NSIS download failed. Retrying in $($attempt * 15) seconds."
-            Start-Sleep -Seconds ($attempt * 15)
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'nsis-3.11.zip'
+          # Upstream checksum: https://sourceforge.net/projects/nsis/files/NSIS%203/3.11/nsis-3.11.zip/download
+          $expectedHash = 'c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1'
+          $sources = @(
+            'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11.zip',
+            'https://distfiles.macports.org/nsis/nsis-3.11.zip'
+          )
+          $verified = $false
+          foreach ($source in $sources) {
+            try {
+              Invoke-WebRequest -Uri $source -OutFile $archive -UseBasicParsing -TimeoutSec 60
+              if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+                throw 'Downloaded NSIS archive did not match the upstream SHA-256.'
+              }
+              $verified = $true
+              break
+            } catch {
+              Write-Warning "NSIS download failed from ${source}: $($_.Exception.Message)"
+            }
           }
+          if (!$verified) { throw 'Could not download a verified NSIS archive from either source.' }
+          $tools = Join-Path $env:RUNNER_TEMP 'driverloom-build-tools'
+          Expand-Archive -LiteralPath $archive -DestinationPath $tools -Force
+          $compiler = Join-Path $tools 'nsis-3.11\makensis.exe'
+          if (!(Test-Path -LiteralPath $compiler)) { throw 'NSIS compiler is missing from the verified archive.' }
+          "DRIVERLOOM_MAKENSIS=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Test and build the single-file installer
         shell: powershell
-        run: .\Build.ps1 -MakeNSIS "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+        run: .\Build.ps1 -MakeNSIS "$env:DRIVERLOOM_MAKENSIS"
       - name: Verify installation and Windows launch paths
         shell: powershell
         run: .\Test-Installer.ps1
