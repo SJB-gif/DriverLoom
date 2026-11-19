@@ -2,7 +2,7 @@
 
 An MIT-licensed Windows 10/11 x64 prototype for recording hardware, checking saved manufacturer sources and applying eligible Windows Update drivers.
 
-Current source: **0.1.2**, prepared locally for repository review. See [Windows verification](docs/VERIFICATION.md) and the [release draft](docs/RELEASE_NOTES_0.1.2.md).
+Current source: **0.1.2**, maintained at [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/HardwareUpdateLauncher). See [Windows verification](docs/VERIFICATION.md) and the [release draft](docs/RELEASE_NOTES_0.1.2.md). No release has been published yet.
 
 ## Run it
 
@@ -24,7 +24,7 @@ The inventory and saved links live in `%LOCALAPPDATA%\HardwareUpdateLauncher\inv
 
 ## GitHub catalog and builds
 
-The source has a GitHub Actions workflow that tests the PowerShell and builds a Windows x64 installer. Confirm the destination owner/repository, whether it already exists, and its visibility before pushing. The optional catalog setting uses unauthenticated reads and requires a public repository; enter that public `owner/repository` in **Settings** if desired. On each check the app reads the latest release tag and `catalog.json` from the repository's `main` branch. It displays the release and provides a link to the release page. The catalog is data. The app does not download or execute scripts or installer binaries from the repository.
+The source has a GitHub Actions workflow that tests the PowerShell and builds a Windows x64 installer. The public source repository is `SJB-gif/HardwareUpdateLauncher`. The optional catalog setting uses unauthenticated reads; enter `SJB-gif/HardwareUpdateLauncher` in **Settings** if desired. On each check the app reads the latest release tag and `catalog.json` from the repository's `main` branch. Until the first release is published, the release lookup has no result. It displays a release when available and provides a link to the release page. The catalog is data. The app does not download or execute scripts or installer binaries from the repository.
 
 Add reviewed entries to the `sources` array in `catalog.json` with this shape. Use the exact values from the local inventory and escape backslashes for JSON.
 

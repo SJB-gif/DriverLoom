@@ -4,7 +4,7 @@
 
 The user requested extraction, diagnosis of the Windows launch failure, verification of the single-file installer, and source preparation for GitHub. Repository confirmation is required before any push or release. Future vendor-driver work in `CODEX_HANDOFF.md` is background, not authorization to implement it.
 
-The ZIP was extracted outside the unrelated TravelMate checkout. Its original source is preserved in local `main` commit `f6bdd3c`; work continues on `codex/windows-launch-installer`. There is no remote. `CODEX_HANDOFF.md` describes the earlier 0.1.1 state; this report describes the local 0.1.2 repair.
+The ZIP was extracted outside the unrelated TravelMate checkout. Its original source is preserved in commit `f6bdd3c`; the repair is commit `b542c79` on `codex/windows-launch-installer`. The prepared history was subsequently imported into the Windows Driver Updater workspace on `main`. The user explicitly authorized a new public repository, [SJB-gif/HardwareUpdateLauncher](https://github.com/SJB-gif/HardwareUpdateLauncher), and a source push on 19 November 2026. Releases remain unpublished at the user's request. `CODEX_HANDOFF.md` describes the earlier 0.1.1 state; this report describes the 0.1.2 repair.
 
 ## Diagnosis
 
@@ -48,15 +48,15 @@ The NSIS portable ZIP used locally was obtained from the MacPorts distribution m
 
 ## Remaining checks before release
 
-- Confirm GitHub owner/repository, existing versus new repository, visibility and publication scope. The connected GitHub installation search returned no repository named HardwareUpdateLauncher; this does not prove a repository is absent or authorize creation.
-- Run and observe the workflow after an approved push. It builds and uploads artifacts only; it cannot publish a GitHub Release with its `contents: read` token. The workflow uses the current documented [checkout](https://github.com/actions/checkout) and [upload-artifact](https://github.com/actions/upload-artifact) actions.
+- Repository confirmation is complete: the user authorized creating public `SJB-gif/HardwareUpdateLauncher` and pushing source, while explicitly withholding release publication. No release or tag is authorized by that source push.
+- A successful hosted workflow run is a release gate. It builds and uploads artifacts only; it cannot publish a GitHub Release with its `contents: read` token. The workflow uses the current documented [checkout](https://github.com/actions/checkout) and [upload-artifact](https://github.com/actions/upload-artifact) actions. Both referenced `v7` tags were verified through GitHub's API before pushing.
 - Click through the interactive installer welcome/finish pages and launch checkbox on independent clean Windows 10 and Windows 11 x64 environments. Local automated smoke checks do not establish coverage of those environments or the full visual flow.
 - The computer-use inventory did not expose the diagnostic app windows, despite their process main-window and responsiveness checks succeeding; no screenshot or manual visual QA is claimed.
 - Exercise actual driver installation and restart handling on a controlled test system. Review BIOS opt-in/USB copy with a disposable USB without flashing firmware. These checks are outside this repair.
 
 ## Behavior intentionally unchanged
 
-Windows Update eligibility and administrator approval for installation, firmware exclusions, manufacturer adapters, version ordering, source matching, optional public GitHub catalog reads, local persistence and BIOS/USB behavior are unchanged. No vendor-driver installation, self-update, remote script execution, repository push or release publication was added.
+Windows Update eligibility and administrator approval for installation, firmware exclusions, manufacturer adapters, version ordering, source matching, optional public GitHub catalog reads, local persistence and BIOS/USB behavior are unchanged. No vendor-driver installation, self-update, remote script execution or release publication was added. Publishing the prepared source repository is a separate action explicitly authorized by the user.
 ## Exact files changed from the handoff baseline
 
 - `.github/workflows/build.yml`
