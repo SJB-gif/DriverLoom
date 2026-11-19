@@ -31,10 +31,10 @@ function Assert-Installer($expected, $actual, [string]$description) {
     if ($actual -cne $expected) { throw "$description expected '$expected', got '$actual'." }
 }
 
-function Wait-TestProcess($process) {
+function Wait-TestProcess($process,[int]$ExpectedExit=0) {
     $null = $process.Handle
     if (!$process.WaitForExit(30000)) { $process.Kill(); throw 'Installer process timed out.' }
-    Assert-Installer 0 $process.ExitCode 'installer process exit'
+    Assert-Installer $ExpectedExit $process.ExitCode 'installer process exit'
     $process.Dispose()
 }
 
@@ -75,6 +75,52 @@ function Assert-Shortcut([string]$path,[string]$label) {
     Assert-Installer 'SJB.DriverLoom' (Invoke-InstalledHost @('--read-shortcut-id',('"'+$path+'"'))) "$label taskbar identity"
 }
 
+function Test-LegacyClose {
+    $legacyRoot=Join-Path $testRoot 'legacy-tray-fixture'
+    $decoyRoot=Join-Path $testRoot 'unrelated-app-fixture'
+    $null=[IO.Directory]::CreateDirectory($legacyRoot);$null=[IO.Directory]::CreateDirectory($decoyRoot)
+    $source=@'
+using System;
+using System.IO;
+using System.Threading;
+using System.Windows.Forms;
+static class LegacyTrayFixture {
+    [STAThread] static void Main(string[] args) {
+        using (Mutex mutex = new Mutex(false, args[1]))
+        using (Form window = new Form()) {
+            window.Text = "DriverLoom legacy test fixture";
+            window.ShowInTaskbar = false;
+            window.FormClosing += delegate(object sender, FormClosingEventArgs e) {
+                if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; window.Hide(); }
+            };
+            window.Shown += delegate { File.WriteAllText(args[0], "ready"); window.Hide(); };
+            Application.Run(window);
+        }
+    }
+}
+'@
+    $compiler=[Microsoft.CSharp.CSharpCodeProvider]::new();$options=[CodeDom.Compiler.CompilerParameters]::new()
+    $options.GenerateExecutable=$true;$options.CompilerOptions='/target:winexe /platform:x64';$options.OutputAssembly=Join-Path $legacyRoot 'DriverLoom.exe'
+    [void]$options.ReferencedAssemblies.Add('System.Windows.Forms.dll');[void]$options.ReferencedAssemblies.Add('System.Drawing.dll');[void]$options.ReferencedAssemblies.Add('System.dll')
+    try{$result=$compiler.CompileAssemblyFromSource($options,$source);if($result.Errors.HasErrors){throw 'Could not compile the isolated legacy tray fixture.'}}finally{$compiler.Dispose()}
+    Copy-Item -LiteralPath $options.OutputAssembly -Destination (Join-Path $decoyRoot 'DriverLoom.exe')
+    $legacy=$null;$decoy=$null
+    try{
+        $legacyReady=Join-Path $legacyRoot 'ready.txt';$decoyReady=Join-Path $decoyRoot 'ready.txt'
+        $legacy=Start-Process -FilePath $options.OutputAssembly -WindowStyle Hidden -ArgumentList @(('"'+$legacyReady+'"'),'Local\HardwareUpdateLauncher') -PassThru
+        $decoy=Start-Process -FilePath (Join-Path $decoyRoot 'DriverLoom.exe') -WindowStyle Hidden -ArgumentList @(('"'+$decoyReady+'"'),('Local\DriverLoom.Decoy-'+[guid]::NewGuid().ToString('N'))) -PassThru
+        $deadline=[DateTime]::UtcNow.AddSeconds(15)
+        while((!(Test-Path -LiteralPath $legacyReady) -or !(Test-Path -LiteralPath $decoyReady)) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 100}
+        if(!(Test-Path -LiteralPath $legacyReady) -or !(Test-Path -LiteralPath $decoyReady)){throw 'Legacy close fixtures did not start.'}
+        $helper=Start-Process -FilePath (Join-Path $PSScriptRoot 'dist\host\DriverLoom-SetupBridge.exe') -WindowStyle Hidden -ArgumentList @('--close',('"'+$legacyRoot+'"')) -PassThru
+        Wait-TestProcess $helper
+        Assert-Installer $true ($legacy.WaitForExit(5000)) 'Restart Manager closes legacy tray windows without a force kill'
+        Assert-Installer $false $decoy.HasExited 'setup leaves an unrelated executable with the same filename running'
+    }finally{
+        foreach($fixture in @($legacy,$decoy)){if($fixture){if(!$fixture.HasExited){$fixture.Kill();[void]$fixture.WaitForExit(5000)};$fixture.Dispose()}}
+    }
+}
+
 function Test-ShortcutChoice([string]$name,[bool]$startMenu,[bool]$desktop,[switch]$Upgrade) {
     $script:installationStarted=$true
     $arguments=@('/S',('/STARTMENU='+[int]$startMenu),('/DESKTOP='+[int]$desktop),('/D='+$installRoot))
@@ -100,7 +146,7 @@ try {
     $stateRoot = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
     [void][IO.Directory]::CreateDirectory($stateRoot)
     $settingsPath = Join-Path $stateRoot 'settings.json'
-    Save-Json $settingsPath @{ Repo = ''; Bios = $false; Sources = @() }
+    Save-Json $settingsPath @{ Repo = ''; Bios = $false; Sources = @();CheckFrequency='Manual';CheckAppUpdates=$false }
     $settingsHash = (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash
     $legacyShell = New-Object -ComObject WScript.Shell
     $legacyShortcut = $legacyShell.CreateShortcut($legacyShortcutPath)
@@ -118,8 +164,11 @@ try {
     Assert-Installer $false (Test-Path -LiteralPath $legacyShortcutPath) 'legacy shortcut replaced during upgrade'
     Assert-Installer $script:LauncherVersion $registration.DisplayVersion 'installed version'
     Assert-Installer $installRoot $registration.InstallLocation 'installation path with spaces'
-    foreach ($name in 'App.ps1', 'Engine.ps1', 'Lifecycle.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom-loops.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
+    foreach ($name in 'App.ps1', 'Engine.ps1', 'Lifecycle.ps1', 'AppUpdates.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom-loops.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
         Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash "$name payload matches source"
+    }
+    foreach($file in (Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'assets\manufacturers') -File)){
+        Assert-Installer (Get-FileHash -LiteralPath $file.FullName).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot ('assets\manufacturers\'+$file.Name))).Hash 'bundled manufacturer artwork matches its source'
     }
     Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'dist\host\DriverLoom.exe')).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot 'DriverLoom.exe')).Hash 'native host matches build'
     $shell = New-Object -ComObject WScript.Shell
@@ -154,6 +203,8 @@ try {
 
     # Launch the installed, unmodified Start menu shortcut twice; never request driver installation.
     foreach ($attempt in 1, 2) {
+        $savedPreferences=[IO.File]::ReadAllBytes($settingsPath)
+        if($attempt -eq 2){Save-Json $settingsPath @{Repo='';Bios=$false;Sources=@();CheckFrequency='Manual';CheckAppUpdates=$false;KeepRunningInTray=$true}}
         $launchProcess = Start-Process -FilePath $shortcutPath -WindowStyle Hidden -PassThru
         $deadline = [datetime]::UtcNow.AddSeconds(25)
         do {
@@ -163,11 +214,28 @@ try {
         Assert-Installer $false $launchProcess.HasExited "shortcut launch $attempt remains running"
         Assert-Installer "DriverLoom $script:LauncherVersion" $launchProcess.MainWindowTitle "shortcut launch $attempt shows app window"
         Assert-Installer $true $launchProcess.Responding "shortcut launch $attempt responds"
-        Stop-Process -Id $launchProcess.Id
-        [void]$launchProcess.WaitForExit(10000)
+        if($attempt -eq 2){
+            [void]$launchProcess.CloseMainWindow()
+            Start-Sleep -Milliseconds 800
+            $launchProcess.Refresh()
+            Assert-Installer $false $launchProcess.HasExited 'tray close keeps the app alive before upgrading'
+        }
+        [IO.File]::WriteAllBytes($settingsPath,$savedPreferences)
+        if($attempt -eq 1){
+            $busy=[Threading.Mutex]::new($false,'Local\DriverLoom.DriverInstall')
+            try{
+                $blocked=Start-Process -FilePath $InstallerPath -WindowStyle Hidden -ArgumentList @('/S',('/D='+$installRoot)) -PassThru
+                Wait-TestProcess $blocked 3
+                Assert-Installer $false $launchProcess.HasExited 'setup refuses to close an app while the driver-install guard is active'
+            }finally{$busy.Dispose()}
+        }
+        $upgrade=Start-Process -FilePath $InstallerPath -WindowStyle Hidden -ArgumentList @('/S',('/D='+$installRoot)) -PassThru
+        Wait-TestProcess $upgrade
+        Assert-Installer $true ($launchProcess.WaitForExit(10000)) 'upgrade closes the running native/tray app'
         $launchProcess.Dispose()
         $launchProcess = $null
     }
+    Test-LegacyClose
     Invoke-TestUninstall
     $installationStarted = $false
     Test-ShortcutChoice 'desktop-only' $false $true -Upgrade

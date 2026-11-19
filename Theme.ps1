@@ -2,6 +2,15 @@ if (!('DriverLoom.UI.Palette' -as [type])) {
     Add-Type -Path (Join-Path $PSScriptRoot 'Theme.cs') -ReferencedAssemblies System.Windows.Forms, System.Drawing
 }
 
+$manufacturerRoot=Join-Path $PSScriptRoot 'assets\manufacturers'
+if(Test-Path -LiteralPath (Join-Path $manufacturerRoot 'manifest.json')){
+    foreach($brand in (Get-Content -LiteralPath (Join-Path $manufacturerRoot 'manifest.json') -Raw|ConvertFrom-Json)){
+        if($brand.Slug -match '^[a-z0-9]+$'){
+            [DriverLoom.UI.DeviceGrid]::AddManufacturerLogo($brand.Name,(Join-Path $manufacturerRoot ($brand.Slug+'-dark.png')),(Join-Path $manufacturerRoot ($brand.Slug+'-light.png')))
+        }
+    }
+}
+
 function Set-AppTheme([string]$preference = 'Dark', $root = $null) {
     if ($preference -notin 'Dark','Light','System') { $preference = 'Dark' }
     [DriverLoom.UI.Palette]::Select($preference)

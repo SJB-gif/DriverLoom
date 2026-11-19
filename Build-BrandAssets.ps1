@@ -27,3 +27,4 @@ try {
 } finally {$writer.Dispose()}
 $source.Dispose()
 Write-Output 'Converted supplied DriverLoom loop artwork to nine Windows icon sizes.'
+& (Join-Path $PSScriptRoot 'Build-ManufacturerAssets.ps1')

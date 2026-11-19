@@ -17,7 +17,7 @@ The public maintainer identifier is the GitHub handle. Personal email addresses 
 
 Only DriverLoom binaries built from this repository on GitHub-hosted Actions runners will be submitted. Signing will require a maintainer's manual approval and multi-factor authentication, in accordance with the Foundation's terms.
 
-The intended sequence is to sign the native DriverLoom launcher, verify it, package that signed launcher into the single-file NSIS installer, then sign and verify the final installer. Checksums must be generated after signing. Signing the outer installer alone does not sign its bundled launcher.
+The intended sequence is to sign the native DriverLoom launcher and setup helper, verify them, package them into the single-file NSIS installer, then sign and verify the final installer. Checksums must be generated after signing. Signing the outer installer alone does not sign its bundled executables.
 
 No certificate keys or account credentials belong in this repository. Signed artifacts will be checked with Windows Authenticode before publication. An unsigned build must remain labelled unsigned rather than being presented as a signed fallback.
 

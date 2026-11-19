@@ -1,5 +1,5 @@
 function Initialize-LifecyclePreferences($preferences) {
-    $defaults=@{CheckFrequency='On opening';KeepRunningInTray=$false;StartWithWindows=$false}
+    $defaults=@{CheckFrequency='On opening';KeepRunningInTray=$false;StartWithWindows=$false;CheckAppUpdates=$true}
     foreach($name in $defaults.Keys){
         if(!$preferences.PSObject.Properties[$name]){$preferences|Add-Member NoteProperty $name $defaults[$name]}
     }
@@ -7,6 +7,7 @@ function Initialize-LifecyclePreferences($preferences) {
     foreach($name in 'KeepRunningInTray','StartWithWindows'){
         if($preferences.$name -isnot [bool]){$preferences.$name=$false}
     }
+    if($preferences.CheckAppUpdates -isnot [bool]){$preferences.CheckAppUpdates=$true}
 }
 
 function Test-AutomaticCheckDue([string]$frequency, [DateTimeOffset]$now, $lastAttempt, $lastSuccess, [bool]$onOpening=$false) {

@@ -254,6 +254,25 @@ namespace DriverLoom.UI
     }
     public class DeviceGrid : DataGridView
     {
+        static readonly System.Collections.Generic.Dictionary<string, Image[]> manufacturerLogos = new System.Collections.Generic.Dictionary<string, Image[]>(StringComparer.OrdinalIgnoreCase);
+        public static int ManufacturerLogoCount { get { return manufacturerLogos.Count; } }
+        public static void AddManufacturerLogo(string name, string dark, string light)
+        {
+            if (manufacturerLogos.ContainsKey(name)) return;
+            Image first = null, second = null;
+            try
+            {
+                using (Image source = Image.FromFile(dark)) first = new Bitmap(source);
+                using (Image source = Image.FromFile(light)) second = new Bitmap(source);
+                manufacturerLogos.Add(name, new Image[] { first, second });
+            }
+            catch { if (first != null) first.Dispose(); if (second != null) second.Dispose(); }
+        }
+        public static void DisposeManufacturerLogos()
+        {
+            foreach (Image[] pair in manufacturerLogos.Values) { pair[0].Dispose(); pair[1].Dispose(); }
+            manufacturerLogos.Clear();
+        }
         public bool Decorated { get; set; }
         string hardwareSortColumn = "Device";
         bool deviceDescending;
@@ -373,6 +392,14 @@ namespace DriverLoom.UI
         }
         static void DrawDevice(Graphics g, Rectangle r, string kind)
         {
+            int separator = kind.IndexOf("  / ", StringComparison.Ordinal);
+            Image[] pair;
+            if (separator > 0 && manufacturerLogos.TryGetValue(kind.Substring(0, separator).Trim(), out pair))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(pair[Palette.Dark ? 0 : 1], r);
+                return;
+            }
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (Pen pen = new Pen(Palette.Muted, 1.5f))
             {

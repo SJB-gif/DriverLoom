@@ -7,6 +7,7 @@ Initialize-LifecyclePreferences $old
 Assert-Lifecycle 'On opening' $old.CheckFrequency 'legacy default frequency'
 Assert-Lifecycle $false $old.KeepRunningInTray 'tray opt-in default'
 Assert-Lifecycle $false $old.StartWithWindows 'login opt-in default'
+Assert-Lifecycle $true $old.CheckAppUpdates 'app release checks default to on opening'
 $invalid=[pscustomobject]@{CheckFrequency='Hourly';KeepRunningInTray='yes';StartWithWindows=1}
 Initialize-LifecyclePreferences $invalid
 Assert-Lifecycle 'On opening' $invalid.CheckFrequency 'invalid frequency fallback'

@@ -20,6 +20,12 @@ This installs into a temporary path with spaces, verifies payload hashes, taskba
 
 GitHub Actions runs the build and installer checks and uploads the EXE and checksum as a workflow artifact. The workflow has read-only repository permissions. Publishing a GitHub release is a separate operation.
 
+Manufacturer SVGs are pinned to the Simple Icons commit and hashes in `assets/manufacturers/manifest.json`. The Windows build rasterises their paths with WPF into dark/light PNGs. Runtime rendering uses bundled PNGs and falls back to category symbols. Source notices and brand-source links are included in the installer.
+
+`AppUpdates.ps1` reads only the fixed DriverLoom latest-release API, accepts published stable numeric versions and validates exact project release/installer URLs. It has no automatic binary execution or dependency on the configurable hardware catalog. Startup checks run in a background job; background tray starts defer the notification until the window is shown.
+
+`SetupBridge.cs` closes only matching installed native executables owned by the current user in the current Windows session. New apps receive a named graceful-exit request; the driver-install guard can refuse it. Older native apps use Restart Manager with explicit process IDs and start times, without force shutdown. Legacy encoded driver-install commands are checked before that fallback. Unknown PowerShell instances, inaccessible process identities and cross-session copies cause a safe refusal instead of a broad process-name kill. Installer checks cover window/tray upgrades, busy refusal, a legacy tray fixture and an unrelated same-name decoy process on a clean runner.
+
 ## Shortcut options
 
 Interactive setup offers Start menu and desktop shortcut checkboxes. On the first install, Start menu is selected and desktop is optional. Upgrades retain the previous selection. For silent deployment, `/STARTMENU=0` or `1` and `/DESKTOP=0` or `1` override the defaults:

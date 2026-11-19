@@ -10,7 +10,7 @@ ManifestSupportedOS Win10
 !include "FileFunc.nsh"
 
 !define APP "DriverLoom"
-!define VERSION "0.1.13"
+!define VERSION "0.1.14"
 !define UNINSTALL "Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher"
 !ifndef OUTPUT_EXE
   !define OUTPUT_EXE "DriverLoom-Setup.exe"
@@ -19,9 +19,10 @@ ManifestSupportedOS Win10
 Name "${APP}"
 OutFile "${OUTPUT_EXE}"
 InstallDir "$LOCALAPPDATA\Programs\HardwareUpdateLauncher"
+InstallDirRegKey HKCU "${UNINSTALL}" "InstallLocation"
 ShowInstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.13.0"
+VIProductVersion "0.1.14.0"
 VIAddVersionKey "ProductName" "${APP}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${APP} Setup"
@@ -47,6 +48,7 @@ Var StartMenuCheck
 Var DesktopCheck
 Var StartMenuSelected
 Var DesktopSelected
+Var SetupLock
 
 Function ShortcutsPage
   !insertmacro MUI_HEADER_TEXT "Shortcuts" "Choose where to add DriverLoom shortcuts."
@@ -121,11 +123,25 @@ Function .onInit
     StrCpy $DesktopSelected $R8
   ${EndIf}
   ClearErrors
-  System::Call 'kernel32::OpenMutexW(i 0x100000, i 0, w "Local\HardwareUpdateLauncher") p.r0'
-  ${If} $0 P<> 0
-    System::Call 'kernel32::CloseHandle(p r0)'
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Exit ${APP} before running setup again. If it is in the tray, right-click its icon and choose Exit."
-    Abort
+FunctionEnd
+
+Function CloseRunningApplication
+  System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\DriverLoom.Setup") p.r0 ?e'
+  Pop $1
+  StrCpy $SetupLock $0
+  ${If} $1 != 0
+    MessageBox MB_ICONEXCLAMATION|MB_OK "DriverLoom setup is already running." /SD IDOK
+    SetErrorLevel 3
+    Quit
+  ${EndIf}
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=DriverLoom-SetupBridge.exe "dist\host\DriverLoom-SetupBridge.exe"
+  ExecWait '"$PLUGINSDIR\DriverLoom-SetupBridge.exe" --close "$INSTDIR"' $0
+  ${If} $0 != 0
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Setup could not safely close DriverLoom. Finish any driver installation, close DriverLoom (including its tray icon), then run setup again. Other Windows sessions must close their own copy." /SD IDOK
+    SetErrorLevel 3
+    Quit
   ${EndIf}
 FunctionEnd
 
@@ -138,12 +154,14 @@ Function LaunchApplication
 FunctionEnd
 
 Section "Install"
+  Call CloseRunningApplication
   SetOutPath "$INSTDIR"
   SetOverwrite on
   File "Launch.ps1"
   File "App.ps1"
   File "Engine.ps1"
   File "Lifecycle.ps1"
+  File "AppUpdates.ps1"
   File "Manufacturers.ps1"
   File "Coverage.ps1"
   File "Theme.ps1"
@@ -159,6 +177,8 @@ Section "Install"
   File "assets\DriverLoom-brand.png"
   File "assets\GitHub-light.png"
   File "assets\GitHub-dark.png"
+  SetOutPath "$INSTDIR\assets\manufacturers"
+  File /r "assets\manufacturers\*.*"
   SetOutPath "$INSTDIR"
 
   # Keep the existing installation/data identity so this also upgrades pre-branding builds.
@@ -186,6 +206,8 @@ Section "Install"
   WriteRegDWORD HKCU "${UNINSTALL}" "NoRepair" 1
   WriteRegDWORD HKCU "${UNINSTALL}" "StartMenuShortcut" $StartMenuSelected
   WriteRegDWORD HKCU "${UNINSTALL}" "DesktopShortcut" $DesktopSelected
+  System::Call 'kernel32::CloseHandle(p $SetupLock)'
+  StrCpy $SetupLock 0
 SectionEnd
 
 Function un.onInit
@@ -208,6 +230,7 @@ Section "Uninstall"
   Delete "$INSTDIR\App.ps1"
   Delete "$INSTDIR\Engine.ps1"
   Delete "$INSTDIR\Lifecycle.ps1"
+  Delete "$INSTDIR\AppUpdates.ps1"
   Delete "$INSTDIR\Manufacturers.ps1"
   Delete "$INSTDIR\Coverage.ps1"
   Delete "$INSTDIR\Theme.ps1"
@@ -218,6 +241,7 @@ Section "Uninstall"
   Delete "$INSTDIR\assets\DriverLoom-brand.png"
   Delete "$INSTDIR\assets\GitHub-light.png"
   Delete "$INSTDIR\assets\GitHub-dark.png"
+  RMDir /r "$INSTDIR\assets\manufacturers"
   Delete "$INSTDIR\ATTRIBUTION.md"
   Delete "$INSTDIR\DriverLoom.exe"
   RMDir "$INSTDIR\assets"

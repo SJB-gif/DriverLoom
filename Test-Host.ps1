@@ -18,13 +18,14 @@ function Invoke-NativeTest([string]$exe,[string[]]$arguments,[int]$expectedExit=
 }
 try{
     [void][IO.Directory]::CreateDirectory($stage)
-    foreach($name in 'App.ps1','Launch.ps1','Engine.ps1','Lifecycle.ps1','Coverage.ps1','Manufacturers.ps1','Install.ps1','Theme.ps1','Theme.cs'){
+    foreach($name in 'App.ps1','Launch.ps1','Engine.ps1','Lifecycle.ps1','AppUpdates.ps1','Coverage.ps1','Manufacturers.ps1','Install.ps1','Theme.ps1','Theme.cs'){
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name)
     }
     [void][IO.Directory]::CreateDirectory((Join-Path $stage 'assets'))
     foreach($name in 'DriverLoom-loops.ico','DriverLoom-brand.png','GitHub-light.png','GitHub-dark.png'){
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('assets\'+$name)) -Destination (Join-Path $stage 'assets')
     }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\manufacturers') -Destination (Join-Path $stage 'assets') -Recurse
     $exe=Join-Path $stage 'DriverLoom.exe'
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dist\host\DriverLoom.exe') -Destination $exe
     $env:LOCALAPPDATA=Join-Path $testRoot 'state'

@@ -54,6 +54,11 @@ function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [strin
     Assert-Startup $(if($lifecycle.ContainsKey('CheckFrequency')){$lifecycle.CheckFrequency}else{'On opening'}) $result.CheckFrequency "$name check schedule preference"
     Assert-Startup ([bool]$lifecycle.KeepRunningInTray) $result.KeepRunningInTray "$name tray opt-in preference"
     Assert-Startup ([bool]$lifecycle.StartWithWindows) $result.StartWithWindows "$name Windows startup preference"
+    Assert-Startup $(if($lifecycle.ContainsKey('CheckAppUpdates')){$lifecycle.CheckAppUpdates}else{$true}) $result.CheckAppUpdates "$name app update preference"
+    Assert-Startup $false $result.AppUpdateCheckStarted "$name smoke mode never contacts GitHub"
+    Assert-Startup 13 $result.ManufacturerLogoCount "$name bundled manufacturer artwork loads"
+    Assert-Startup $true $result.SetupExitDeferredWhileBusy "$name setup cannot interrupt driver installation"
+    Assert-Startup $true $result.SetupExitClosesWindow "$name setup request exits even when tray mode is enabled"
     Assert-Startup ([bool]$lifecycle.KeepRunningInTray) $result.TrayVisible "$name notification area icon follows preference"
     Assert-Startup ([bool]$lifecycle.KeepRunningInTray) $result.CloseHidesToTray "$name close hides only when enabled"
     Assert-Startup $true $result.RestoreRequestShowsWindow "$name reopening restores existing window"
@@ -67,7 +72,7 @@ try {
     Assert-Startup 0 $empty.DriverRows 'empty offers'
     Assert-Startup $false $empty.FreshActionVisible 'no updates means no Update All action'
     Assert-Startup $true $empty.AutomaticCheckOnOpening 'default checks on opening'
-    $manual=Invoke-StartupCase 'manual-tray' $null $false '' $null @{CheckFrequency='Manual';KeepRunningInTray=$true;StartWithWindows=$true}
+    $manual=Invoke-StartupCase 'manual-tray' $null $false '' $null @{CheckFrequency='Manual';KeepRunningInTray=$true;StartWithWindows=$true;CheckAppUpdates=$false}
     Assert-Startup $false $manual.AutomaticCheckOnOpening 'manual mode suppresses automatic startup check'
     $daily=Invoke-StartupCase 'daily' $null $false '' $null @{CheckFrequency='Daily'}
     Assert-Startup $true $daily.AutomaticCheckOnOpening 'daily first launch is due'

@@ -1,0 +1,132 @@
+[
+  {
+    "Name": "AMD",
+    "Slug": "amd",
+    "Hex": "ED1C24",
+    "Source": "https://www.amd.com",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/amd.svg",
+    "SHA256": "c4c2f985dc1427aa7a54e3f80ef5ca35dba911bbed184a0dc6def148c1dfa420"
+  },
+  {
+    "Name": "ASUS",
+    "Slug": "asus",
+    "Hex": "000000",
+    "Source": "https://www.asus.com",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/asus.svg",
+    "SHA256": "3c44aa3018aff929760e1812ee4bba3c77098ab5c9ea8a815b66f5c70f3074b4"
+  },
+  {
+    "Name": "Corsair",
+    "Slug": "corsair",
+    "Hex": "231F20",
+    "Source": "https://www.corsair.com/newsroom/company-logos",
+    "Guidelines": "https://www.corsair.com/newsroom/company-logos",
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/corsair.svg",
+    "SHA256": "dd5ff396db570a9230405e169c3e447f2604c91cccf3627d86c68daf08cab081"
+  },
+  {
+    "Name": "Dell",
+    "Slug": "dell",
+    "Hex": "007DB8",
+    "Source": "https://www.dell.com",
+    "Guidelines": "https://brand.delltechnologies.com/logos/",
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/dell.svg",
+    "SHA256": "be787bc8a294cecf64f7197b36f3f095583b2274f13ab336e7dabfe582353c45"
+  },
+  {
+    "Name": "HP",
+    "Slug": "hp",
+    "Hex": "0096D6",
+    "Source": "https://brandcentral.hp.com/us/en/elements/hp-logo.html",
+    "Guidelines": "https://brandcentral.hp.com/us/en/elements/hp-logo.html",
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/hp.svg",
+    "SHA256": "29c08a63cdea89850876a3840d93096b4125151dbba17a27926a08f9f3b0f788"
+  },
+  {
+    "Name": "Intel",
+    "Slug": "intel",
+    "Hex": "0071C5",
+    "Source": "https://www.intel.com/content/www/us/en/newsroom/resources/press-kits-intel-overview.html",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/intel.svg",
+    "SHA256": "25d0d4387af0999eb5dc79b165ecfd7b972ff43047406da533f3207ac92c0a57"
+  },
+  {
+    "Name": "Lenovo",
+    "Slug": "lenovo",
+    "Hex": "E2231A",
+    "Source": "https://news.lenovo.com/press-kits/",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/lenovo.svg",
+    "SHA256": "6d2d3756e0b0dd70a7f8d678794b43c89eb08871a45bcd79ede8ecc64a6141ca"
+  },
+  {
+    "Name": "MediaTek",
+    "Slug": "mediatek",
+    "Hex": "EC9430",
+    "Source": "https://corp.mediatek.com/news-events/press-library",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/mediatek.svg",
+    "SHA256": "b87119aeb0963afe72e533d4feccc92e0323b14edfb7c05eacf99fed7a5fb2a0"
+  },
+  {
+    "Name": "MSI",
+    "Slug": "msi",
+    "Hex": "FF0000",
+    "Source": "https://www.msi.com/page/brochure",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/msi.svg",
+    "SHA256": "79be40634e937238e44b16c1c182c24db4fb7ed121e6cdd5c30b23c682fe3f65"
+  },
+  {
+    "Name": "NVIDIA",
+    "Slug": "nvidia",
+    "Hex": "76B900",
+    "Source": "https://www.nvidia.com/en-us",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/nvidia.svg",
+    "SHA256": "b0e4cfc12712c840d4d630c9a717200fbd09aeeadbd3faeac13bda2e2ed050b0"
+  },
+  {
+    "Name": "Razer",
+    "Slug": "razer",
+    "Hex": "00FF00",
+    "Source": "https://press.razer.com",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/razer.svg",
+    "SHA256": "e68b802b643535039c2cc4d50e0c4e9ee7811561b93c634876e9478e0886948b"
+  },
+  {
+    "Name": "Samsung",
+    "Slug": "samsung",
+    "Hex": "1428A0",
+    "Source": "https://www.samsung.com/us/about-us/brand-identity/logo/",
+    "Guidelines": "https://www.samsung.com/us/about-us/brand-identity/logo/",
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/samsung.svg",
+    "SHA256": "4a241ca8ebab6e71883b172acb9fb454efa69f308e4f2c31ec80668aeb6627d9"
+  },
+  {
+    "Name": "Seagate",
+    "Slug": "seagate",
+    "Hex": "6EBE49",
+    "Source": "https://branding.seagate.com/productpage/3fc51aba-c35a-4eff-a833-a258b0440bd2",
+    "Guidelines": null,
+    "RepositoryCommit": "32e030086fdc605196391aab28519b14dc4295b4",
+    "SVGSource": "https://raw.githubusercontent.com/simple-icons/simple-icons/32e030086fdc605196391aab28519b14dc4295b4/icons/seagate.svg",
+    "SHA256": "6fa1ce05134491cd92c31a977eb6af2c7efc28b804aa3dc5b002e587a7f19a25"
+  }
+]
