@@ -1,12 +1,13 @@
-param([string]$InstallerPath = (Join-Path $PSScriptRoot 'dist\HardwareUpdateLauncher-Setup.exe'))
+param([string]$InstallerPath = (Join-Path $PSScriptRoot 'dist\DriverLoom-Setup.exe'))
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Engine.ps1')
 if (![Environment]::Is64BitProcess) { throw 'Run installer checks from 64-bit Windows PowerShell.' }
 if (!(Test-Path -LiteralPath $InstallerPath)) { throw 'Build the installer first.' }
 $regPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher'
-$shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'Hardware Update Launcher.lnk'
-if ((Test-Path -LiteralPath $regPath) -or (Test-Path -LiteralPath $shortcutPath)) {
-    throw 'Installer checks require no existing Hardware Update Launcher installation. Use a disposable Windows user or clean test machine.'
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'DriverLoom.lnk'
+$legacyShortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'Hardware Update Launcher.lnk'
+if ((Test-Path -LiteralPath $regPath) -or (Test-Path -LiteralPath $shortcutPath) -or (Test-Path -LiteralPath $legacyShortcutPath)) {
+    throw 'Installer checks require no existing DriverLoom or Hardware Update Launcher installation. Use a disposable Windows user or clean test machine.'
 }
 $mutex = $null
 if ([Threading.Mutex]::TryOpenExisting('Local\HardwareUpdateLauncher', [ref]$mutex)) {
@@ -19,6 +20,7 @@ $powerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.
 $originalLocalAppData = $env:LOCALAPPDATA
 $launchProcess = $null
 $installationStarted = $false
+$legacyFixtureCreated = $false
 
 function Assert-Installer($expected, $actual, [string]$description) {
     if ($actual -cne $expected) { throw "$description expected '$expected', got '$actual'." }
@@ -54,17 +56,27 @@ try {
     $settingsPath = Join-Path $stateRoot 'settings.json'
     Save-Json $settingsPath @{ Repo = ''; Bios = $false; Sources = @() }
     $settingsHash = (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash
+    $legacyShell = New-Object -ComObject WScript.Shell
+    $legacyShortcut = $legacyShell.CreateShortcut($legacyShortcutPath)
+    $legacyShortcut.TargetPath=$powerShell
+    $legacyShortcut.Save()
+    $legacyFixtureCreated=$true
+    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($legacyShortcut)
+    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($legacyShell)
     $installationStarted = $true
     $setup = Start-Process -FilePath $InstallerPath -WindowStyle Hidden -ArgumentList @('/S', ('/D=' + $installRoot)) -PassThru
     Wait-TestProcess $setup
     $registration = Get-ItemProperty -LiteralPath $regPath
+    Assert-Installer 'DriverLoom' $registration.DisplayName 'branded installed application name'
+    Assert-Installer $false (Test-Path -LiteralPath $legacyShortcutPath) 'legacy shortcut replaced during upgrade'
     Assert-Installer $script:LauncherVersion $registration.DisplayVersion 'installed version'
     Assert-Installer $installRoot $registration.InstallLocation 'installation path with spaces'
-    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'LICENSE') {
+    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom.ico', 'assets\DriverLoom.png', 'LICENSE') {
         Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash "$name payload matches source"
     }
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
+    Assert-Installer ((Join-Path $installRoot 'assets\DriverLoom.ico')+',0') $shortcut.IconLocation 'branded shortcut icon'
     Assert-Installer $true ([string]::Equals($powerShell, $shortcut.TargetPath, [StringComparison]::OrdinalIgnoreCase)) 'shortcut uses 64-bit System32 PowerShell'
     foreach ($required in @('-STA', '-WindowStyle Hidden', ('-File "' + (Join-Path $installRoot 'Launch.ps1') + '"'))) {
         if (!$shortcut.Arguments.Contains($required)) { throw "Shortcut is missing $required." }
@@ -94,9 +106,9 @@ try {
         do {
             Start-Sleep -Milliseconds 200
             $launchProcess.Refresh()
-        } while (!$launchProcess.HasExited -and $launchProcess.MainWindowTitle -ne "Hardware Update Launcher $script:LauncherVersion" -and [datetime]::UtcNow -lt $deadline)
+        } while (!$launchProcess.HasExited -and $launchProcess.MainWindowTitle -ne "DriverLoom $script:LauncherVersion" -and [datetime]::UtcNow -lt $deadline)
         Assert-Installer $false $launchProcess.HasExited "shortcut launch $attempt remains running"
-        Assert-Installer "Hardware Update Launcher $script:LauncherVersion" $launchProcess.MainWindowTitle "shortcut launch $attempt shows app window"
+        Assert-Installer "DriverLoom $script:LauncherVersion" $launchProcess.MainWindowTitle "shortcut launch $attempt shows app window"
         Assert-Installer $true $launchProcess.Responding "shortcut launch $attempt responds"
         Stop-Process -Id $launchProcess.Id
         [void]$launchProcess.WaitForExit(10000)
@@ -110,6 +122,7 @@ try {
 } finally {
     if ($launchProcess -and !$launchProcess.HasExited) { Stop-Process -Id $launchProcess.Id; [void]$launchProcess.WaitForExit(10000) }
     if ($installationStarted) { Invoke-TestUninstall }
+    if ($legacyFixtureCreated -and (Test-Path -LiteralPath $legacyShortcutPath)) { Remove-Item -LiteralPath $legacyShortcutPath -Force }
     $env:LOCALAPPDATA = $originalLocalAppData
     $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)
     $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

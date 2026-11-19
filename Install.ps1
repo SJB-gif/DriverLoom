@@ -6,7 +6,7 @@ function Install-DriverOffers($approved) {
         $info = New-Object -ComObject Microsoft.Update.SystemInfo
         if ($info.RebootRequired) { throw 'Windows Update is waiting for a restart. Restart and run Check for updates again.' }
         $session = New-Object -ComObject Microsoft.Update.Session
-        $session.ClientApplicationID = 'Hardware Update Launcher'
+        $session.ClientApplicationID = 'DriverLoom'
         $search = Search-WindowsDrivers $session
         $available = @{}
         $found = @(for ($i = 0; $i -lt $search.Updates.Count; $i++) {

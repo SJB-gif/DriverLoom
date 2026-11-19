@@ -8,16 +8,23 @@ function Assert-Startup($expected, $actual, [string]$description) {
     if ($actual -cne $expected) { throw "$description expected '$expected', got '$actual'." }
 }
 
-function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled) {
+function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '') {
     $env:LOCALAPPDATA = Join-Path $testRoot $name
     $state = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
     [void][IO.Directory]::CreateDirectory($state)
-    Save-Json (Join-Path $state 'settings.json') @{ Repo = ''; Bios = $biosEnabled; Sources = @() }
+    $preferences=@{ Repo = ''; Bios = $biosEnabled; Sources = @() }
+    if($theme){$preferences.Theme=$theme}
+    Save-Json (Join-Path $state 'settings.json') $preferences
     if ($snapshot) { Save-Json (Join-Path $state 'inventory.json') $snapshot }
     $output = & $powerShell -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Launch.ps1') -SmokeTest
     if ($LASTEXITCODE -ne 0) { throw "$name startup failed with exit code $LASTEXITCODE." }
     $result = ($output -join [Environment]::NewLine) | ConvertFrom-Json
     Assert-Startup $script:LauncherVersion $result.Version "$name version"
+    Assert-Startup 'DriverLoom' $result.ProductName "$name product identity"
+    Assert-Startup "DriverLoom $script:LauncherVersion" $result.WindowTitle "$name branded window title"
+    Assert-Startup $true $result.HasIcon "$name multi-resolution icon loads"
+    Assert-Startup $(if($theme){$theme}else{'Dark'}) $result.ThemePreference "$name saved appearance and legacy default"
+    if($result.Background -eq $result.TextColor){throw 'Theme text has no contrast.'}
     Assert-Startup $true $result.Visible "$name real form shown"
     Assert-Startup $true $result.Is64BitProcess "$name 64-bit host"
     Assert-Startup 'STA' $result.ApartmentState "$name apartment"
@@ -71,6 +78,11 @@ try {
     Assert-Startup $false $excludedOnly.FreshUpdateAllEnabled 'fresh excluded-only scan cannot enable Update All'
     $optIn = Invoke-StartupCase 'bios-opt-in' $snapshot $true
     Assert-Startup 1 $optIn.HardwareRows 'unsupported BIOS does not add an unchecked row to main results'
+    $light = Invoke-StartupCase 'light-theme' $snapshot $false 'Light'
+    Assert-Startup 'Light' $light.ResolvedTheme 'explicit light appearance'
+    $system = Invoke-StartupCase 'system-theme' $snapshot $false 'System'
+    Assert-Startup $true ($system.ResolvedTheme -in 'Dark','Light') 'system appearance resolves to a supported palette'
+    if($light.Background -eq $cached.Background){throw 'Dark and light theme backgrounds did not change.'}
 
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'
@@ -88,7 +100,7 @@ try {
     if ($log -notmatch 'Engine\.ps1' -or $log -notmatch '64-bit process: True' -or $log -notmatch 'Apartment: STA') {
         throw 'Startup log is missing the failure or host details.'
     }
-    Write-Output 'Windows startup checks passed: empty and cached state, BIOS opt-in, 64-bit STA host, failure exit and startup log.'
+    Write-Output 'Windows startup checks passed: DriverLoom branding/icon, legacy settings, dark/light/system themes, cached install guards, BIOS opt-in, 64-bit STA host and startup errors.'
 } finally {
     $env:LOCALAPPDATA = $originalLocalAppData
     $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)

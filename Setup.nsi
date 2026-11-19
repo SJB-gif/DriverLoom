@@ -7,13 +7,13 @@ ManifestSupportedOS Win10
 !include "WinVer.nsh"
 !include "x64.nsh"
 
-!define APP "Hardware Update Launcher"
-!define VERSION "0.1.4"
+!define APP "DriverLoom"
+!define VERSION "0.1.5"
 !define UNINSTALL "Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher"
 !define POWERSHELL "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
 !define LAUNCH_ARGS '-NoLogo -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\Launch.ps1"'
 !ifndef OUTPUT_EXE
-  !define OUTPUT_EXE "HardwareUpdateLauncher-Setup.exe"
+  !define OUTPUT_EXE "DriverLoom-Setup.exe"
 !endif
 
 Name "${APP}"
@@ -21,15 +21,18 @@ OutFile "${OUTPUT_EXE}"
 InstallDir "$LOCALAPPDATA\Programs\HardwareUpdateLauncher"
 ShowInstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.4.0"
+VIProductVersion "0.1.5.0"
 VIAddVersionKey "ProductName" "${APP}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${APP} Setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
-VIAddVersionKey "LegalCopyright" "Hardware Update Launcher contributors"
+VIAddVersionKey "LegalCopyright" "DriverLoom contributors"
+
+!define MUI_ICON "assets\DriverLoom.ico"
+!define MUI_UNICON "assets\DriverLoom.ico"
 
 !define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_TEXT "Open Hardware Update Launcher"
+!define MUI_FINISHPAGE_RUN_TEXT "Open DriverLoom"
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchApplication
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
@@ -74,15 +77,24 @@ Section "Install"
   File "Engine.ps1"
   File "Manufacturers.ps1"
   File "Coverage.ps1"
+  File "Theme.ps1"
+  File "Theme.cs"
   File "Install.ps1"
   File "LICENSE"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  SetOutPath "$INSTDIR\assets"
+  File "assets\DriverLoom.ico"
+  File "assets\DriverLoom.png"
+  SetOutPath "$INSTDIR"
 
-  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "${POWERSHELL}" '${LAUNCH_ARGS}'
+  # Keep the existing installation/data identity so this also upgrades pre-branding builds.
+  Delete "$SMPROGRAMS\Hardware Update Launcher.lnk"
+  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "${POWERSHELL}" '${LAUNCH_ARGS}' "$INSTDIR\assets\DriverLoom.ico"
 
   WriteRegStr HKCU "${UNINSTALL}" "DisplayName" "${APP}"
   WriteRegStr HKCU "${UNINSTALL}" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKCU "${UNINSTALL}" "Publisher" "Hardware Update Launcher contributors"
+  WriteRegStr HKCU "${UNINSTALL}" "Publisher" "DriverLoom contributors"
+  WriteRegStr HKCU "${UNINSTALL}" "DisplayIcon" "$INSTDIR\assets\DriverLoom.ico"
   WriteRegStr HKCU "${UNINSTALL}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "${UNINSTALL}" "NoModify" 1
@@ -108,6 +120,11 @@ Section "Uninstall"
   Delete "$INSTDIR\Engine.ps1"
   Delete "$INSTDIR\Manufacturers.ps1"
   Delete "$INSTDIR\Coverage.ps1"
+  Delete "$INSTDIR\Theme.ps1"
+  Delete "$INSTDIR\Theme.cs"
+  Delete "$INSTDIR\assets\DriverLoom.ico"
+  Delete "$INSTDIR\assets\DriverLoom.png"
+  RMDir "$INSTDIR\assets"
   Delete "$INSTDIR\Install.ps1"
   Delete "$INSTDIR\LICENSE"
   Delete "$INSTDIR\Uninstall.exe"

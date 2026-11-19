@@ -27,8 +27,8 @@ jobs:
         run: .\Test-Installer.ps1
       - uses: actions/upload-artifact@v7
         with:
-          name: HardwareUpdateLauncher-Setup
+          name: DriverLoom-Setup
           if-no-files-found: error
           path: |
-            dist/HardwareUpdateLauncher-Setup.exe
-            dist/HardwareUpdateLauncher-Setup.exe.sha256
+            dist/DriverLoom-Setup.exe
+            dist/DriverLoom-Setup.exe.sha256

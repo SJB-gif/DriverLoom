@@ -13,19 +13,20 @@ $compilerVersion = (& $MakeNSIS /VERSION) -join ''
 if ($LASTEXITCODE -ne 0 -or $compilerVersion -notmatch '^v(\d+\.\d+)' -or [version]$Matches[1] -lt [version]'3.11') {
     throw "NSIS 3.11 or later is required; found $compilerVersion."
 }
+& (Join-Path $PSScriptRoot 'Build-BrandAssets.ps1')
 & (Join-Path $PSScriptRoot 'Test-Engine.ps1')
 & (Join-Path $PSScriptRoot 'Test-Manufacturers.ps1')
 & (Join-Path $PSScriptRoot 'Test-Coverage.ps1')
 & (Join-Path $PSScriptRoot 'Test-App.ps1')
 $dist = Join-Path $PSScriptRoot 'dist'
 [void][IO.Directory]::CreateDirectory($dist)
-$installer = Join-Path $dist 'HardwareUpdateLauncher-Setup.exe'
+$installer = Join-Path $dist 'DriverLoom-Setup.exe'
 Push-Location $PSScriptRoot
 try {
     & $MakeNSIS /V3 /WX '/INPUTCHARSET' 'UTF8' ('/DOUTPUT_EXE=' + $installer) Setup.nsi
     if ($LASTEXITCODE -ne 0) { throw "NSIS build failed with exit code $LASTEXITCODE." }
 } finally { Pop-Location }
 $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-[IO.File]::WriteAllText(($installer + '.sha256'), "$hash  HardwareUpdateLauncher-Setup.exe`n", [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText(($installer + '.sha256'), "$hash  DriverLoom-Setup.exe`n", [Text.UTF8Encoding]::new($false))
 Write-Output "Built $installer ($compilerVersion)"
 Write-Output "SHA256: $hash"
