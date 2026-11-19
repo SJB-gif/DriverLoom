@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.10'
+$script:LauncherVersion = '0.1.11'
 . (Join-Path $PSScriptRoot 'Coverage.ps1')
 . (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 
@@ -151,7 +151,7 @@ function Get-HttpsUri([string]$value) {
 function Read-WebSource([string]$url, [int]$limit = 2097152) {
     $uri = Get-HttpsUri $url
     $request = [Net.HttpWebRequest]::Create($uri)
-    $request.UserAgent = 'DriverLoom/0.1.10'
+    $request.UserAgent = 'DriverLoom/0.1.11'
     $request.AllowAutoRedirect = $false
     $request.Timeout = 12000
     $request.ReadWriteTimeout = 12000
@@ -266,7 +266,8 @@ function Get-VendorResults($inventory, $settings, $warnings, [string]$osVersion 
             $builtInSource = [bool]$source
         }
         $route = Get-OfficialSupportRoute $row $inventory
-        $check = [pscustomobject]@{ Key = $row.Key; Current = $row.Current; Available = ''; Url = $route.Url; Status = 'Unsupported automatic check'; Detail = $route.Reason; Checked = $false }
+        $method = Get-UpdateMethod $row $inventory $route
+        $check = [pscustomobject]@{ Key = $row.Key; Current = $row.Current; Available = ''; Url = $method.Url; Status = 'Unsupported automatic check'; Detail = $method.Reason; Checked = $false }
         if ($row.Kind -in 'CPU', 'RAM', 'System', 'Motherboard' -and !$source) { $check.Status = 'Inventory only'; $check.Detail = 'This identity is used for hardware and package matching.' }
         elseif (!$source -and $row.Kind -eq 'Chipset/system driver' -and $row.Manufacturer -match 'AMD|Advanced Micro Devices' -and (Get-AmdChipsetSource $inventory)) {
             $check.Status = 'See AMD Chipset Software package check'; $check.Url = Get-AmdChipsetSource $inventory

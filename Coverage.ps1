@@ -41,7 +41,7 @@ function Get-HardwareVendor($row) {
     $ids = @($row.IDs) -join ' '
     foreach ($entry in @(
         @('VEN_10DE','NVIDIA'), @('VEN_(?:1002|1022)','AMD'), @('VEN_8086','Intel'), @('(?:VEN_10EC|VID_0BDA)','Realtek'),
-        @('(?:VEN_14C3|VID_0E8D)','MediaTek'), @('VID_1B1C','Corsair'), @('VID_046D','Logitech'), @('VID_1532','Razer')
+        @('(?:VEN_14C3|VID_0E8D|VID_0489&PID_E0E2(?:&|\s|$))','MediaTek'), @('VID_1B1C','Corsair'), @('VID_046D','Logitech'), @('VID_1532','Razer')
     )) { if ($ids -match $entry[0]) { return $entry[1] } }
     return [string]$row.Manufacturer
 }
@@ -56,7 +56,7 @@ function Get-OfficialSupportRoute($row, $inventory) {
         'AMD' = @('https://www.amd.com/en/support/download/drivers.html', 'Use the exact AMD product page or AMD Auto-Detect for this product.')
         'Intel' = @('https://www.intel.com/content/www/us/en/support/detect.html', 'Intel Driver & Support Assistant handles products without a verified direct version feed.')
         'Samsung' = @('https://semiconductor.samsung.com/consumer-storage/magician/', 'Samsung Magician is required when firmware is not published as an unambiguous model-specific version.')
-        'Corsair' = @('https://www.corsair.com/us/en/s/downloads', 'Corsair iCUE or the SSD utility must check this device; its firmware version is not exposed by a public model feed.')
+        'Corsair' = @('https://www.corsair.com/us/en/s/downloads', 'Use the CORSAIR software for this product. Windows driver versions and device firmware versions are different.')
         'Seagate' = @('https://www.seagate.com/support/downloads/', 'Seagate firmware eligibility can require the drive serial number; it is not submitted automatically.')
         'Western Digital' = @('https://support-en.wd.com/', 'Use the official drive utility or exact-product support workflow.')
         'Crucial' = @('https://www.crucial.com/support/storage-executive', 'Crucial Storage Executive checks exact drive firmware compatibility.')
@@ -87,4 +87,63 @@ function Get-CoverageMode($row, $check) {
     if ($check.Checked) { return 'Checked' }
     if ($check.Status -like 'See *package check' -or $check.Status -like 'See AMD Chipset Software package check') { return 'Package component' }
     return 'Unsupported'
+}
+
+function New-UpdateMethod([string]$name,[string]$url,[string]$reason,[string]$kind='Utility') {
+    [pscustomobject]@{Name=$name;Url=$url;Reason=$reason;Kind=$kind}
+}
+
+function Get-UpdateMethod($row,$inventory,$route=$null) {
+    if(!$route){$route=Get-OfficialSupportRoute $row $inventory}
+    $vendor=Get-HardwareVendor $row
+    if($vendor -eq 'Corsair'){
+        if($row.Kind -eq 'Storage firmware'){
+            return New-UpdateMethod 'CORSAIR SSD Toolbox' 'https://help.corsair.com/hc/en-us/articles/15292042915213-SSD-How-to-Update-your-SSD-Firmware' 'Use CORSAIR SSD Toolbox to check this drive. DriverLoom has no verified model-specific firmware feed for it.'
+        }
+        return New-UpdateMethod 'CORSAIR iCUE' 'https://www.corsair.com/us/en/s/icue' 'Check software and supported device updates in iCUE. These Windows driver components do not expose a comparable device-firmware version.'
+    }
+    if($vendor -eq 'ASUS' -and $row.Kind -eq 'Audio/video driver' -and $row.Model -eq 'ASUS Utility'){
+        return New-UpdateMethod 'ASUS Armoury Crate' 'https://www.asus.com/support/faq/1041654/' 'ASUS audio/noise-cancellation utility component. Check Armoury Crate for its component updates; its driver version is not the Armoury Crate app version.'
+    }
+    $board=$inventory|Where-Object Kind -eq 'Motherboard'|Select-Object -First 1
+    $asusPage=if($board -and (Get-HardwareVendor $board) -eq 'ASUS'){'https://www.asus.com/supportonly/'+[Uri]::EscapeDataString($board.Model)+'/helpdesk_download/'}else{'https://www.asus.com/support/download-center/'}
+    if($row.Model -match '^Sonic Studio Virtual Mixer$'){
+        return New-UpdateMethod 'ASUS audio / Sonic Studio' $asusPage 'Virtual audio component supplied with ASUS audio software. Review the Audio package for your exact motherboard; do not compare its component version with the whole package version.' 'Application'
+    }
+    if($row.Model -match '^Xvdd SCSI Miniport$' -and $row.Provider -in 'Xbox','Microsoft','Microsoft Corporation'){
+        return New-UpdateMethod 'Microsoft Gaming Services' 'https://apps.microsoft.com/detail/9mwpm2cqnlhn' 'Xbox virtual-disk component. Check Gaming Services updates through Microsoft Store; this is not a standalone physical-storage driver download.' 'Application'
+    }
+    if($row.Model -match '(?i)(?:\bWLVPN\b.*\bTap\b|^TAP-Windows Adapter)' -or $row.Manufacturer -match '^TAP-Windows Provider'){
+        return New-UpdateMethod 'VPN application (owner not identified)' '' 'Virtual network adapter installed by VPN software. Update the VPN app that installed it. The adapter name does not identify one verified consumer-app download.' 'Application'
+    }
+    if($vendor -eq 'Seagate'){
+        return New-UpdateMethod 'Seagate Download Finder' 'https://apps1.seagate.com/downloads/request.html' 'Firmware eligibility may depend on the exact drive serial number and current firmware. Use the official finder manually; DriverLoom does not send a serial number.' 'Portal'
+    }
+    if($vendor -eq 'Samsung' -and $row.Kind -eq 'Storage firmware'){
+        return New-UpdateMethod 'Samsung Magician' 'https://semiconductor.samsung.com/consumer-storage/magician/' 'Use Samsung Magician when DriverLoom cannot identify one exact, comparable firmware download.'
+    }
+    if($vendor -eq 'Intel'){
+        return New-UpdateMethod 'Intel Driver & Support Assistant' 'https://www.intel.com/content/www/us/en/support/detect.html' 'Review this supported Intel product in Intel Driver & Support Assistant; DriverLoom could not complete a verified direct comparison.'
+    }
+    if($route.Vendor -eq 'ASUS'){return New-UpdateMethod 'ASUS motherboard support' $asusPage $route.Reason 'Manual'}
+    $name=if($route.Vendor){$route.Vendor+' support'}else{'Manual source required'}
+    return New-UpdateMethod $name $route.Url $route.Reason 'Manual'
+}
+
+function Get-UpdateMethodGroups([object[]]$items) {
+    foreach($group in @($items|Group-Object -Property {$_.Manager+"`n"+$_.Url}|Sort-Object Name)){
+        $first=$group.Group[0]
+        [pscustomobject]@{Manager=$first.Manager;Url=$first.Url;Items=@($group.Group);Devices=(@($group.Group|ForEach-Object {$_.Device+' ('+$_.Manufacturer+')'}) -join "`r`n");Reason=(@($group.Group.Reason|Select-Object -Unique) -join "`r`n")}
+    }
+}
+
+function Get-UpdateMethodsCopyText([object[]]$items) {
+    $lines=[System.Collections.Generic.List[string]]::new()
+    $lines.Add("DriverLoom $script:LauncherVersion - Other update methods")
+    $lines.Add("MANAGED BY`tDEVICE`tMANUFACTURER`tREASON`tWEBPAGE")
+    foreach($item in @($items|Sort-Object Manager,Device)){
+        $values=foreach($name in 'Manager','Device','Manufacturer','Reason','Url'){([string]$item.$name)-replace '[\r\n\t]+',' '}
+        $lines.Add(($values -join "`t"))
+    }
+    return $lines -join "`r`n"
 }

@@ -14,6 +14,8 @@ function Get-DisplayStatus([string]$status) {
         'Current at source' { 'UP TO DATE' }
         'Installed version is higher' { 'INSTALLED IS NEWER' }
         'Unsupported' { 'UNSUPPORTED' }
+        'Managed by software' { 'VENDOR APP' }
+        'Manual check required' { 'MANUAL CHECK' }
         default { 'PACKAGE DETAILS' }
     }
 }

@@ -23,6 +23,27 @@ $codec=New-HardwareRow 'Audio/video driver' 'Realtek' 'Realtek Audio' '' '' '1.0
 Assert-Coverage 'Dell' (Get-OfficialSupportRoute $codec @($dell)).Vendor 'OEM route for laptop codec'
 Assert-Coverage 'Unsupported' (Get-CoverageMode $corsair $null) 'unhandled firmware is unsupported, never current'
 Assert-Coverage 'Windows' (Get-CoverageMode $nvme $null) 'Windows components are not unsupported items'
+$headset=New-HardwareRow 'Audio/video driver' 'CORSAIR' 'CORSAIR VOID ELITE SURROUND USB Adapter' '' '' '2.4.2.0' @('USB\VID_1B1C&PID_0A53')
+$virtual=New-HardwareRow 'Input device driver' 'Corsair' 'Corsair composite virtual input device' 'SERIAL-DO-NOT-COPY' '' '3.0.88.0' @()
+$headsetMethod=Get-UpdateMethod $headset @()
+$virtualMethod=Get-UpdateMethod $virtual @()
+$ssdMethod=Get-UpdateMethod $corsair @()
+Assert-Coverage 'CORSAIR iCUE' $headsetMethod.Name 'headset follows its software, not SSD firmware tooling'
+Assert-Coverage $headsetMethod.Name $virtualMethod.Name 'Corsair virtual component shares the iCUE group'
+Assert-Coverage 'CORSAIR SSD Toolbox' $ssdMethod.Name 'SSD firmware has its own update utility'
+$xbox=New-HardwareRow 'Storage driver' 'Xbox' 'Xvdd SCSI Miniport' '' '' '10.0.1.0' @() 'Xbox' 'oem10.inf'
+Assert-Coverage 'Microsoft Gaming Services' (Get-UpdateMethod $xbox @()).Name 'Xbox virtual storage is app managed'
+$vpn=New-HardwareRow 'Network driver' 'TAP-Windows Provider V9' 'WLVPN Windows Tap Adapter' '' '' '9.26.0.0' @()
+Assert-Coverage '' (Get-UpdateMethod $vpn @()).Url 'VPN adapter does not invent an owning-app download link'
+$items=@(foreach($entry in @(@($headset,$headsetMethod),@($virtual,$virtualMethod),@($corsair,$ssdMethod))){
+    [pscustomobject]@{Manager=$entry[1].Name;Device=$entry[0].Model;Manufacturer=Get-HardwareVendor $entry[0];Reason=$entry[1].Reason;Url=$entry[1].Url;Hardware=$entry[0]}
+})
+$groups=@(Get-UpdateMethodGroups $items)
+Assert-Coverage 2 $groups.Count 'utility grouping retains separate iCUE and SSD Toolbox rows'
+Assert-Coverage 2 @($groups|Where-Object Manager -eq 'CORSAIR iCUE'|ForEach-Object Items).Count 'both iCUE devices remain inspectable'
+$copy=Get-UpdateMethodsCopyText $items
+Assert-Coverage $true ($copy -like '*CORSAIR iCUE*' -and $copy -like '*Corsair composite virtual input device*' -and $copy -like '*https://www.corsair.com/us/en/s/icue*') 'copy includes manager, individual device and official webpage'
+Assert-Coverage $false ($copy -like '*SERIAL-DO-NOT-COPY*') 'copy never serializes private hardware identity'
 $intelCpu=New-HardwareRow 'CPU' 'GenuineIntel' 'Intel Core i7 example' '' '' '' @()
 $rx=New-HardwareRow 'GPU driver' 'Advanced Micro Devices' 'AMD Radeon RX 7900 XTX' '' '' '32.0.1.0' @()
 Assert-Coverage 'https://www.amd.com/en/support/downloads/drivers.html/graphics/radeon-rx/radeon-rx-7000-series/amd-radeon-rx-7900-xtx.html' (Get-AmdGraphicsSource @($intelCpu,$rx) $rx) 'Radeon discrete GPU on an Intel PC'

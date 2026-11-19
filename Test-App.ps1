@@ -91,6 +91,7 @@ try {
     Assert-Startup $true $cached.FreshUpdateAllEnabled 'fresh eligible offer can enable Update All'
     Assert-Startup $true $cached.FreshActionVisible 'fresh available updates reveal Update All'
     Assert-Startup 1 $cached.UnsupportedCount 'unsupported devices are separated into settings'
+    Assert-Startup 1 $cached.UpdateMethodGroupCount 'manual firmware item has an update-method group'
     Assert-Startup 1 $cached.WindowsManagedHidden 'Windows-managed controller removed from main results'
     Assert-Startup $false ($cached.MainDevices -contains 'Standard NVM Express Controller') 'inbox controller absent from results'
     Assert-Startup $false ($cached.MainDevices -contains 'Unsupported test SSD') 'unsupported firmware absent from results'

@@ -13,8 +13,8 @@ using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("DriverLoom")]
 [assembly: System.Reflection.AssemblyProduct("DriverLoom")]
-[assembly: System.Reflection.AssemblyVersion("0.1.10.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.1.10.0")]
+[assembly: System.Reflection.AssemblyVersion("0.1.11.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.1.11.0")]
 
 namespace DriverLoom
 {

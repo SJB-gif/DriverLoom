@@ -170,15 +170,17 @@ function Get-AmdCheck($row, $inventory, $target, $cache) {
 function Get-AsusCheck($row, $inventory, $target, $cache) {
     $board = $inventory | Where-Object { $_.Kind -eq 'Motherboard' -and $_.Manufacturer -match 'ASUS|ASUSTeK' } | Select-Object -First 1
     if (!$board) { return $null }
-    $category = ''; $pattern = ''
+    $category = ''; $pattern = ''; $packageModel = ''
     if ($row.Kind -eq 'Network driver') {
         $intel = [regex]::Match($row.Model, '\b(I225|I226)-[A-Z0-9]+\b', 'IgnoreCase')
         if ($intel.Success -and $row.Manufacturer -match 'Intel') { $category = 'LAN'; $pattern = '\b' + $intel.Groups[1].Value + '\b' }
         elseif ($row.Model -match 'MediaTek.*(?:MT7922|RZ616)') { $category = 'Wireless'; $pattern = '(?:AMD\s+Wi-?Fi|MediaTek.*(?:7922|RZ616))' }
     } elseif ($row.Kind -eq 'Audio/video driver' -and $row.Model -eq 'Realtek USB Audio' -and ($row.IDs -join ' ') -match 'USB\\(?:VID_0BDA&PID_40(?:80|82)|VID_0B05&PID_1A52)') {
         $category = 'Audio'; $pattern = 'Realtek\s+USB\s+Audio'
-    } elseif ($row.Kind -eq 'Bluetooth driver' -and (Get-HardwareVendor $row) -eq 'MediaTek' -and ($row.IDs -join ' ') -match 'USB\\VID_0E8D&PID_061[68]') {
+    } elseif ($row.Kind -eq 'Bluetooth driver' -and (Get-HardwareVendor $row) -eq 'MediaTek' -and ($row.IDs -join ' ') -match 'USB\\(?:VID_0E8D&PID_061[68]|VID_0489&PID_E0E2)(?:&|\s|$)') {
         $category = 'Bluetooth'; $pattern = '(?:AMD\s+Bluetooth|MediaTek.*(?:7922|RZ616))'
+        # This OEM ID was verified in the official RZ616 mtkbtfilter.inf package.
+        if(($row.IDs -join ' ') -match 'VID_0489&PID_E0E2(?:&|\s|$)'){$packageModel='RZ616'}
     }
     if (!$category) { return $null }
     $url = 'https://www.asus.com/supportonly/' + [Uri]::EscapeDataString($board.Model) + '/helpdesk_download/'
@@ -186,7 +188,8 @@ function Get-AsusCheck($row, $inventory, $target, $cache) {
     $feed = Get-VendorPage $api $cache | ConvertFrom-Json
     if ($feed.Status -ne 'SUCCESS' -or [string]$feed.Result.Model -ne $board.Model) { throw 'ASUS feed does not match the exact motherboard model.' }
     $files = @($feed.Result.Obj | Where-Object Name -eq $category | ForEach-Object { $_.Files } | Where-Object {
-        $_.Title -match $pattern -and $_.Title -notmatch '(?i)\b(beta|preview)\b' -and $_.Version -match '^\d+(?:\.\d+){1,3}$'
+        $_.Title -match $pattern -and $_.Title -notmatch '(?i)\b(beta|preview)\b' -and $_.Version -match '^\d+(?:\.\d+){1,3}$' -and
+        (!$packageModel -or ($_.Title+' '+$_.DownloadUrl.Global) -match ('\b'+[regex]::Escape($packageModel)+'\b|_'+[regex]::Escape($packageModel)+'_'))
     })
     # Select a numeric driver version, not a package date or a driver for another board variant.
     $latest = $files | Sort-Object { [version]$_.Version } -Descending | Select-Object -First 1

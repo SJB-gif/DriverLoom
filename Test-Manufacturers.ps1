@@ -38,6 +38,11 @@ function Read-WebSource([string]$url, [int]$limit = 2097152) {
                 @{ Title = 'AMD WiFi Driver'; Version = '3.3.0.918'; ReleaseDate = '2024/01/23' }
             ) }
             @{ Name = 'Audio'; Files = @(@{ Title = 'Realtek USB Audio Driver'; Version = '6.3.9600.2342'; ReleaseDate = '2023/01/30' }) }
+            @{ Name = 'Bluetooth'; Files = @(
+                @{ Title = 'AMD Bluetooth Driver'; Version = '1.1037.0.399'; ReleaseDate = '2024/01/23'; DownloadUrl = @{Global='/pub/ASUS/mb/02BT/DRV_Bluetooth_AMD_RZ616_TP_W11_64.zip'} }
+                @{ Title = 'AMD Bluetooth Driver'; Version = '9.0.0.0'; ReleaseDate = '2026/01/01'; DownloadUrl = @{Global='/pub/ASUS/mb/02BT/DRV_Bluetooth_AMD_RZ608_TP_W11_64.zip'} }
+                @{ Title = 'Intel Bluetooth Driver'; Version = '99.0.0.0'; ReleaseDate = '2026/01/01'; DownloadUrl = @{Global='/pub/ASUS/mb/02BT/Intel.zip'} }
+            ) }
         ) } } | ConvertTo-Json -Depth 10 -Compress)
     }
     if ($url -like '*amd.com/en/support/downloads/drivers.html/*') {
@@ -100,7 +105,15 @@ $check = Get-AsusCheck $asusAudio $inventory $target $cache
 Assert-Manufacturer '6.3.9600.2342' $check.Available 'ASUS onboard USB audio identity'
 $externalAudio = New-HardwareRow 'Audio/video driver' 'Realtek' 'Realtek USB Audio' '' '' '1.0' @('USB\VID_0BDA&PID_1234')
 Assert-Manufacturer $null (Get-AsusCheck $externalAudio $inventory $target $cache) 'unrelated USB audio hardware is not matched to the board'
+$bluetooth=New-HardwareRow 'Bluetooth driver' 'MediaTek' 'MediaTek Bluetooth Adapter' '' '' '1.930.0.257' @('USB\VID_0489&PID_E0E2&REV_0100')
+$check=Get-AsusCheck $bluetooth $inventory $target $cache
+Assert-Manufacturer '1.1037.0.399' $check.Available 'verified OEM Bluetooth ID selects the RZ616 package, not a higher version for another chipset'
+Assert-Manufacturer 'Newer at source' $check.Status 'matching Bluetooth update is detected'
+$unrelatedBluetooth=New-HardwareRow 'Bluetooth driver' 'MediaTek' 'MediaTek Bluetooth Adapter' '' '' '1.0' @('USB\VID_0489&PID_E0E20')
+Assert-Manufacturer $null (Get-AsusCheck $unrelatedBluetooth $inventory $target $cache) 'partial product ID cannot establish a Bluetooth match'
 $script:wrongBoard = $true
+$check = Get-AutomaticManufacturerCheck $bluetooth $inventory $target @{}
+Assert-Manufacturer $false $check.Checked 'Bluetooth also rejects a sibling-board response'
 $check = Get-AutomaticManufacturerCheck $lan $inventory $target @{}
 Assert-Manufacturer $false $check.Checked 'sibling ASUS board rejected'
 $script:wrongBoard = $false

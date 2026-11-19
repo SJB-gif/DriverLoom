@@ -6,7 +6,7 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
-**Latest tested version: 0.1.10.** The public release is still **0.1.8**. The check-frequency and background settings described below are in the 0.1.10 test build, available from its [successful GitHub Actions run](https://github.com/SJB-gif/DriverLoom/actions/runs/44470264802). Release publishing and signing setup are on hold.
+**Latest source/test version: 0.1.11.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
 
 ## Code signing policy
 
@@ -23,11 +23,14 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 
 - Installed and available versions, with clear update status.
 - Checks for supported NVIDIA, AMD, Intel, ASUS and Samsung hardware.
-- Show or hide unsupported devices in Settings, with reasons and excluded offers available to copy.
+- Group items by the app or manual update method they require, with official web links and copyable details in Settings.
+- Show or hide items without automatic checks in the hardware list.
 - Windows Update shortcuts in Settings and the diagnostic lists.
 - Dark, light and system themes, plus an optional BIOS/USB preparation guide.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
+
+**Other update methods** groups devices by their update software: for example, CORSAIR peripherals under iCUE, CORSAIR SSDs under SSD Toolbox, and Xbox virtual storage under Microsoft Gaming Services. The page lists each device and links to the official software or support page. A group is not a claim that an update is available. Unknown software owners are not assigned guessed download links.
 
 ## Checks and background operation
 

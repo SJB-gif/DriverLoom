@@ -130,13 +130,13 @@ function Get-GridCopyText($grid, [string]$title) {
     return $lines -join "`r`n"
 }
 
-function Add-ListActions($dialog, $grid, [string]$title) {
+function Add-ListActions($dialog, $grid, [string]$title, [string]$copyText='') {
     $top=$dialog.ClientSize.Height-58
     $copy=New-Button 'Copy list';$copy.SetBounds(24,$top,142,34);$copy.Enabled=$grid.Rows.Count -gt 0
     $feedback=[Windows.Forms.Label]::new();$feedback.Tag='Muted';$feedback.SetBounds(418,$top,410,34);$feedback.TextAlign='MiddleLeft'
-    $copy.Tag=[pscustomobject]@{Grid=$grid;Title=$title;Feedback=$feedback}
+    $copy.Tag=[pscustomobject]@{Grid=$grid;Title=$title;Feedback=$feedback;CopyText=$copyText}
     $copy.Add_Click({param($sender,$eventArgs)
-        try{[Windows.Forms.Clipboard]::SetText((Get-GridCopyText $sender.Tag.Grid $sender.Tag.Title));$sender.Tag.Feedback.Text='Copied to clipboard.'}
+        try{$text=if($sender.Tag.CopyText){$sender.Tag.CopyText}else{Get-GridCopyText $sender.Tag.Grid $sender.Tag.Title};[Windows.Forms.Clipboard]::SetText($text);$sender.Tag.Feedback.Text='Copied to clipboard.'}
         catch{$sender.Tag.Feedback.Text='Clipboard is busy. Please try again.'}
     })
     $windowsUpdate=New-Button 'Open Windows Update';$windowsUpdate.SetBounds(178,$top,228,34);$windowsUpdate.Add_Click({Open-WindowsUpdate})
@@ -188,13 +188,16 @@ function Refresh-View {
         if ($mode -in 'Identity', 'Package component') { continue }
         if ($mode -eq 'Unsupported') {
             $route = Get-OfficialSupportRoute $row $script:snapshot.Inventory
-            $item=[pscustomobject]@{ Device=$row.Model; Manufacturer=Get-HardwareVendor $row; Reason=if($check.Detail){$check.Detail}else{$route.Reason}; Url=if($check.Url){$check.Url}else{$route.Url}; Hardware=$row }
+            $method=Get-UpdateMethod $row $script:snapshot.Inventory $route
+            $reason=if($method.Kind -in 'Utility','Application','Portal'){$method.Reason}elseif($check.Detail){$check.Detail}else{$method.Reason}
+            if($check.Status -like '*source unavailable*' -and $check.Detail){$reason+="`r`nLast automatic check: "+$check.Detail}
+            $item=[pscustomobject]@{ Device=$row.Model; Manufacturer=Get-HardwareVendor $row; Manager=$method.Name; MethodKind=$method.Kind; Reason=$reason; Url=$method.Url; Hardware=$row }
             $unsupported.Add($item)
             if(!$script:settings.ShowUnsupported){continue}
-            $check=[pscustomobject]@{Status='Unsupported';Detail=$item.Reason;Url=$item.Url;Available='';Checked=$false}
+            $check=[pscustomobject]@{Status=if($method.Kind -in 'Utility','Application'){'Managed by software'}else{'Manual check required'};Detail=$method.Name+"`r`n"+$item.Reason;Url=$item.Url;Available='';Checked=$false}
         }
         $name = if ($row.Kind -eq 'GPU software' -and $row.Part) { $row.Model + ' - ' + $row.Part } else { $row.Model }
-        $action = if ($mode -eq 'Unsupported') { 'Support details' } elseif ($check.Status -eq 'Newer at source') { 'Review update' } else { 'Vendor details' }
+        $action = if ($mode -eq 'Unsupported') {if($check.Url){'Open update page'}else{'View details'}} elseif ($check.Status -eq 'Newer at source') { 'Review update' } else { 'Vendor details' }
         $i = $hardware.Rows.Add(@($name, $row.Current, $check.Available, (Get-DisplayStatus $check.Status), $action))
         $hardware.Rows[$i].Tag = [pscustomobject]@{ Device=$row; Url=$check.Url; Check=$check }
         $hardware.Rows[$i].Cells['Device'].Tag=(Get-HardwareVendor $row)+'  /  '+$row.Kind
@@ -216,23 +219,38 @@ function Refresh-View {
 }
 
 function Show-UnsupportedItems([switch]$Preview) {
-    $dialog = New-Dialog 'Unsupported items | DriverLoom' 530
+    $dialog = New-Dialog 'Other update methods | DriverLoom' 530
     $dialog.ClientSize = [Drawing.Size]::new(980,530)
-    Add-DialogHeading $dialog 'Unsupported items' 'These devices need a manufacturer utility or an exact supported source. Right-click to edit a source.'
-    $grid = New-Grid ([ordered]@{ Device=140; Manufacturer=65; Reason=230 })
-    foreach ($item in $script:unsupportedRows) {
-        $i = $grid.Rows.Add(@($item.Device,$item.Manufacturer,$item.Reason))
-        $grid.Rows[$i].Tag=$item
-        $grid.Rows[$i].Cells['Reason'].ToolTipText = $item.Reason
+    Add-DialogHeading $dialog 'Other update methods' 'Grouped by the software or support page used to check them. These are not confirmed update offers.'
+    $grid = New-Grid ([ordered]@{'Managed by'=100;Devices=150;'Next step'=220})
+    $source=[Windows.Forms.DataGridViewLinkColumn]::new();$source.Name='Webpage';$source.HeaderText='WEBPAGE';$source.FillWeight=80
+    $source.LinkColor=[DriverLoom.UI.Palette]::Accent;$source.ActiveLinkColor=$source.LinkColor;$source.VisitedLinkColor=$source.LinkColor
+    [void]$grid.Columns.Add($source)
+    foreach ($group in @(Get-UpdateMethodGroups $script:unsupportedRows)) {
+        $action=if($group.Url){'Open website'}else{''}
+        $i = $grid.Rows.Add(@($group.Manager,$group.Devices,$group.Reason,$action))
+        $grid.Rows[$i].Tag=$group
+        $grid.Rows[$i].Cells['Next step'].ToolTipText = $group.Reason
     }
     $grid.DefaultCellStyle.WrapMode='True'; $grid.AutoSizeRowsMode='AllCells'
+    $grid.RowTemplate.MinimumHeight=66
+    $grid.Add_CellContentClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -eq $sender.Columns['Webpage'].Index){$url=$sender.Rows[$eventArgs.RowIndex].Tag.Url;if($url){Open-Link $url}}})
+    $grid.Add_CellMouseDown({param($sender,$eventArgs)if($eventArgs.Button -eq 'Right' -and $eventArgs.RowIndex -ge 0){$sender.CurrentCell=$sender.Rows[$eventArgs.RowIndex].Cells[0]}})
     $context=[Windows.Forms.ContextMenuStrip]::new()
-    $edit=[Windows.Forms.ToolStripMenuItem]::new('Edit official source...')
-    $edit.Add_Click({if($grid.SelectedRows.Count -gt 0){$item=$grid.SelectedRows[0].Tag;Edit-Source ([pscustomobject]@{Device=$item.Hardware;Url=$item.Url;Check=$null})}})
+    $edit=[Windows.Forms.ToolStripMenuItem]::new('Edit device source')
+    $context.Add_Opening({param($sender,$eventArgs)
+        $edit.DropDownItems.Clear()
+        if(!$grid.SelectedRows.Count){$eventArgs.Cancel=$true;return}
+        foreach($item in $grid.SelectedRows[0].Tag.Items){
+            $entry=[Windows.Forms.ToolStripMenuItem]::new($item.Device);$entry.Tag=$item
+            $entry.Add_Click({param($sender,$eventArgs)$item=$sender.Tag;Edit-Source ([pscustomobject]@{Device=$item.Hardware;Url=$item.Url;Check=$null})})
+            [void]$edit.DropDownItems.Add($entry)
+        }
+    })
     [void]$context.Items.Add($edit); $grid.ContextMenuStrip=$context
     $context.Renderer=[DriverLoom.UI.MenuRenderer]::new()
     $hostPanel=[Windows.Forms.Panel]::new();$hostPanel.SetBounds(24,104,932,340);$hostPanel.Controls.Add($grid);$dialog.Controls.Add($hostPanel)
-    Add-ListActions $dialog $grid 'Unsupported items'
+    Add-ListActions $dialog $grid 'Other update methods' (Get-UpdateMethodsCopyText $script:unsupportedRows)
     if($Preview){$dialog.Add_Shown({Save-FormPreview $dialog 'unsupported';$dialog.Close()})}
     try { [void]$dialog.ShowDialog($form) } finally { $dialog.Dispose(); $context.Dispose() }
 }
@@ -351,8 +369,8 @@ function Edit-Settings([switch]$Preview) {
     $biosGuide.Add_Click({Show-BiosGuide});$firmware.Controls.Add($biosGuide)
     $coverage=Add-SettingsCard $body 'CHECK COVERAGE' 476 0 440 236
     $coverageText=[Windows.Forms.Label]::new();$coverageText.Text='Windows components stay hidden. Review devices and Windows Update offers that need a manual step.';$coverageText.SetBounds(18,44,404,46);$coverage.Controls.Add($coverageText)
-    $showUnsupported=[Windows.Forms.CheckBox]::new();$showUnsupported.Text='Show unsupported devices in the hardware list';$showUnsupported.Checked=$script:settings.ShowUnsupported;$showUnsupported.SetBounds(18,94,404,28);$coverage.Controls.Add($showUnsupported)
-    $unsupportedButton=New-Button ("Unsupported items ($($script:unsupportedRows.Count))")
+    $showUnsupported=[Windows.Forms.CheckBox]::new();$showUnsupported.Text='Show items without automatic checks';$showUnsupported.Checked=$script:settings.ShowUnsupported;$showUnsupported.SetBounds(18,94,404,28);$coverage.Controls.Add($showUnsupported)
+    $unsupportedButton=New-Button ("Other update methods ($($script:unsupportedRows.Count) devices)")
     $unsupportedButton.SetBounds(18,132,404,32);$unsupportedButton.Add_Click({Show-UnsupportedItems})
     $excludedCount=@($script:snapshot.ExcludedOffers|Where-Object{$_}).Count
     $excludedButton=New-Button ("Windows Update exclusions ($excludedCount)")
@@ -695,6 +713,7 @@ $form.Add_Shown({
             BiosEnabled = [bool]$script:settings.Bios
             UpdateAllEnabled = Test-CanInstallSnapshot $script:snapshot $script:fresh $false
             UnsupportedCount = $script:unsupportedRows.Count
+            UpdateMethodGroupCount = @(Get-UpdateMethodGroups $script:unsupportedRows).Count
             ShowUnsupported = $script:settings.ShowUnsupported
             CheckFrequency = $script:settings.CheckFrequency
             KeepRunningInTray = $script:settings.KeepRunningInTray
