@@ -60,7 +60,7 @@ try {
     $registration = Get-ItemProperty -LiteralPath $regPath
     Assert-Installer $script:LauncherVersion $registration.DisplayVersion 'installed version'
     Assert-Installer $installRoot $registration.InstallLocation 'installation path with spaces'
-    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Install.ps1', 'Launch.ps1', 'LICENSE') {
+    foreach ($name in 'App.ps1', 'Engine.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'LICENSE') {
         Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash "$name payload matches source"
     }
     $shell = New-Object -ComObject WScript.Shell

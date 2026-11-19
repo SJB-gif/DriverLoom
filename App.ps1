@@ -37,6 +37,9 @@ if (Test-Path -LiteralPath $inventoryPath) {
 $script:job = $null
 $script:installer = $null
 $script:fresh = $false
+$script:applyAfterScan = $false
+$script:unsupportedRows = @()
+$script:hiddenWindowsCount = 0
 
 function Show-Message([string]$message) {
     [void][Windows.Forms.MessageBox]::Show($form, $message, 'Hardware Update Launcher')
@@ -76,76 +79,87 @@ function New-Grid([System.Collections.IDictionary]$columns) {
 }
 
 function Get-SelectedRow {
-    if ($hardware.SelectedRows.Count -gt 0) { return $hardware.SelectedRows[0].Tag }
+    if ($hardware.SelectedRows.Count -gt 0 -and $hardware.SelectedRows[0].Tag.Device) { return $hardware.SelectedRows[0].Tag }
 }
 
 function Refresh-View {
     $hardware.Rows.Clear()
-    $drivers.Rows.Clear()
     $details.Text = ''
     $summary.Text = 'No saved scan. Check for updates to inspect Windows Update and manufacturer versions.'
-    $repoLink.Enabled = $false
-    $install.Enabled = $false
-    $bios.Enabled = [bool]$script:settings.Bios
+    $script:unsupportedRows = @()
     if (!$script:snapshot) { return }
     $checks = @{}
     foreach ($check in @($script:snapshot.Checks)) { if ($check) { $checks["$($check.Key)|$($check.Current)"] = $check } }
-    $system = $script:snapshot.Inventory | Where-Object Kind -eq 'System' | Select-Object -First 1
     $orderedInventory = @($script:snapshot.Inventory | Sort-Object @{ Expression = {
         $itemCheck = $checks["$($_.Key)|$($_.Current)"]
         if ($itemCheck.Status -eq 'Newer at source') { 0 } elseif ($itemCheck.Checked) { 1 } else { 2 }
     } }, Kind, Model)
+    $hiddenWindows = 0
+    $unsupported = [System.Collections.Generic.List[object]]::new()
     foreach ($row in $orderedInventory) {
         if (!$row -or ($row.Kind -eq 'BIOS' -and !$script:settings.Bios)) { continue }
         $check = $checks["$($row.Key)|$($row.Current)"]
-        $local = $script:settings.Sources | Where-Object Key -eq $row.Key | Select-Object -First 1
-        $report = 'Check required'
-        $available = ''
-        $url = Get-VendorPortal $row $system
-        if ($check) { $report = $check.Status; $available = $check.Available; if ($check.Url) { $url = $check.Url } }
-        if ($local -and $local.Url -ne $url) { $url = $local.Url; $report = 'Source saved. Check required.'; $available = '' }
-        $i = $hardware.Rows.Add(@($row.Kind, $row.Manufacturer, $row.Model, $row.Current, $available, $report))
-        $hardware.Rows[$i].Tag = [pscustomobject]@{ Device = $row; Url = $url; Check = $check }
+        $mode = Get-CoverageMode $row $check
+        if ($mode -eq 'Windows') { $hiddenWindows++; continue }
+        if ($mode -in 'Identity', 'Package component') { continue }
+        if ($mode -eq 'Unsupported') {
+            $route = Get-OfficialSupportRoute $row $script:snapshot.Inventory
+            $unsupported.Add([pscustomobject]@{ Device=$row.Model; Manufacturer=Get-HardwareVendor $row; Reason=if($check.Detail){$check.Detail}else{$route.Reason}; Url=if($check.Url){$check.Url}else{$route.Url}; Hardware=$row })
+            continue
+        }
+        $name = if ($row.Kind -eq 'GPU software' -and $row.Part) { $row.Model + ' - ' + $row.Part } else { $row.Model }
+        $action = if ($check.Status -eq 'Newer at source') { 'Review update' } else { 'Vendor details' }
+        $i = $hardware.Rows.Add(@($name, $row.Current, $check.Available, $check.Status, $action))
+        $hardware.Rows[$i].Tag = [pscustomobject]@{ Device=$row; Url=$check.Url; Check=$check }
         if ($check.Status -eq 'Newer at source') { $hardware.Rows[$i].DefaultCellStyle.BackColor = [Drawing.Color]::FromArgb(232, 246, 235) }
     }
-    foreach ($offer in @($script:snapshot.Offers)) {
-        if ($offer) {
-            $i = $drivers.Rows.Add(@($offer.Title, $offer.Class, $offer.Date, 'Eligible', 'Included in Update All after confirmation.'))
-            $drivers.Rows[$i].Tag = $offer
-        }
+    $script:unsupportedRows = $unsupported.ToArray()
+    $script:hiddenWindowsCount = $hiddenWindows
+    foreach ($offer in @($script:snapshot.Offers | Where-Object { $_ })) {
+        $i = $hardware.Rows.Add(@($offer.Title, '', '', 'Ready through Windows Update', 'Included in update'))
+        $hardware.Rows[$i].Tag = [pscustomobject]@{ Offer=$offer; Url=''; Check=$null; Device=$null }
     }
-    foreach ($offer in @($script:snapshot.ExcludedOffers)) {
-        if ($offer) {
-            $reason = @($offer.Reasons) -join ' '
-            $i = $drivers.Rows.Add(@($offer.Title, $offer.Class, $offer.Date, 'Excluded', $reason))
-            $drivers.Rows[$i].Tag = $offer
-            $drivers.Rows[$i].DefaultCellStyle.ForeColor = [Drawing.Color]::DimGray
-            $drivers.Rows[$i].Cells['Reason'].ToolTipText = $reason
-        }
-    }
-    $repo = $script:snapshot.Repository
-    if ($repo -and $script:settings.Repo -and $repo.ReleaseUrl -eq "https://github.com/$($script:settings.Repo)/releases") { $repoLink.Enabled = $true }
     $eligibleCount = @($script:snapshot.Offers | Where-Object { $_ }).Count
     $excludedCount = @($script:snapshot.ExcludedOffers | Where-Object { $_ }).Count
-    $install.Enabled = $script:fresh -and $script:snapshot.WindowsUpdateOK -and $eligibleCount -gt 0
     $notes = @("Inventory captured: $($script:snapshot.CapturedAt)   |   Windows: $($script:snapshot.OS)")
     if (!$script:fresh) { $notes += 'Saved scan. Run Check for updates before installing.' }
-    if ($script:snapshot.WindowsUpdateOK) {
-        if ($script:snapshot.PSObject.Properties['WindowsUpdateOfferCount']) {
-            $notes += "Windows Update: $($script:snapshot.WindowsUpdateOfferCount) offered; $eligibleCount eligible; $excludedCount excluded. See the Windows Update offers tab for reasons."
-        } else { $notes += "Windows Update: $eligibleCount eligible. This older saved scan did not record exclusions; check again for details." }
-    }
     $checkedCount = @($script:snapshot.Checks | Where-Object Checked -eq $true).Count
-    $uncheckedCount = @($script:snapshot.Checks | Where-Object { $_.Status -like 'Not checked*' -or $_.Status -like 'Source check failed*' }).Count
     $newerCount = @($script:snapshot.Checks | Where-Object Status -eq 'Newer at source').Count
-    $windowsSummary = if (!$script:snapshot.WindowsUpdateOK) { 'Windows Update check failed; see details.' }
-        elseif ($script:snapshot.PSObject.Properties['WindowsUpdateOfferCount']) { "Windows Update: $($script:snapshot.WindowsUpdateOfferCount) offered; $eligibleCount eligible; $excludedCount excluded." }
-        else { "Windows Update: $eligibleCount eligible; check again to record exclusions." }
-    $summary.Text = $windowsSummary + "`r`nManufacturer lookups: $checkedCount completed; $newerCount newer; $uncheckedCount not checked. Select a row, then Open source for vendor packages."
-    $notes += "Manufacturer lookups: $checkedCount completed; $uncheckedCount not checked. Manufacturer packages are reviewed through Open source; Update All installs Windows Update offers only."
-    if ($repo -and $repo.Release) { $notes += "GitHub release: $($repo.Release)   |   Installed launcher: $script:LauncherVersion" }
+    $summary.Text = "$newerCount manufacturer update(s) found; $eligibleCount Windows Update package(s) ready. $checkedCount manufacturer checks completed.`r`n$($unsupported.Count) unsupported items and $excludedCount excluded offers are in Settings. $hiddenWindows Windows components hidden."
+    $unsupportedItem.Text = "Unsupported items ($($unsupported.Count))..."
+    $exclusionsItem.Text = "Windows Update exclusions ($excludedCount)..."
+    $notes += 'Manufacturer packages labelled Review update require manual vendor installation. The main button scans, then offers to install supported Windows Update packages.'
     $notes += @($script:snapshot.Warnings)
     $details.Lines = [string[]]$notes
+}
+
+function Show-UnsupportedItems([switch]$Preview) {
+    $dialog = New-Dialog 'Unsupported items' 470
+    $dialog.ClientSize = [Drawing.Size]::new(980,470)
+    $grid = New-Grid ([ordered]@{ Device=140; Manufacturer=65; Reason=230 })
+    foreach ($item in $script:unsupportedRows) {
+        $i = $grid.Rows.Add(@($item.Device,$item.Manufacturer,$item.Reason))
+        $grid.Rows[$i].Tag=$item
+        $grid.Rows[$i].Cells['Reason'].ToolTipText = $item.Reason
+    }
+    $grid.DefaultCellStyle.WrapMode='True'; $grid.AutoSizeRowsMode='AllCells'
+    $context=[Windows.Forms.ContextMenuStrip]::new()
+    $edit=[Windows.Forms.ToolStripMenuItem]::new('Edit official source...')
+    $edit.Add_Click({if($grid.SelectedRows.Count -gt 0){$item=$grid.SelectedRows[0].Tag;Edit-Source ([pscustomobject]@{Device=$item.Hardware;Url=$item.Url;Check=$null})}})
+    [void]$context.Items.Add($edit); $grid.ContextMenuStrip=$context
+    $dialog.Controls.Add($grid)
+    if($Preview){$dialog.Add_Shown({$image=[Drawing.Bitmap]::new($dialog.Width,$dialog.Height);try{$dialog.DrawToBitmap($image,[Drawing.Rectangle]::new(0,0,$dialog.Width,$dialog.Height));$image.Save(($env:HARDWARE_LAUNCHER_TEST_PREVIEW+'-unsupported.png'),[Drawing.Imaging.ImageFormat]::Png)}finally{$image.Dispose()};$dialog.Close()})}
+    try { [void]$dialog.ShowDialog($form) } finally { $dialog.Dispose(); $context.Dispose() }
+}
+
+function Show-WindowsExclusions {
+    $dialog = New-Dialog 'Windows Update exclusions' 420
+    $dialog.ClientSize = [Drawing.Size]::new(980,420)
+    $grid = New-Grid ([ordered]@{ Package=170; Class=60; Reason=240 })
+    foreach ($offer in @($script:snapshot.ExcludedOffers | Where-Object { $_ })) { [void]$grid.Rows.Add(@($offer.Title,$offer.Class,(@($offer.Reasons)-join ' '))) }
+    $grid.DefaultCellStyle.WrapMode='True'; $grid.AutoSizeRowsMode='AllCells'
+    $dialog.Controls.Add($grid)
+    try { [void]$dialog.ShowDialog($form) } finally { $dialog.Dispose() }
 }
 
 function New-Dialog([string]$title, [int]$height) {
@@ -174,8 +188,8 @@ function Add-TextInput($parent, [string]$value, [int]$top) {
     return $box
 }
 
-function Edit-Source {
-    $selected = Get-SelectedRow
+function Edit-Source($selection = $null) {
+    $selected = if($selection){$selection}else{Get-SelectedRow}
     if (!$selected) { Show-Message 'Select a hardware row first.'; return }
     $device = $selected.Device
     $existing = $script:settings.Sources | Where-Object Key -eq $device.Key | Select-Object -First 1
@@ -323,7 +337,9 @@ function Show-BiosGuide {
     try { [void]$dialog.ShowDialog($form) } finally { $dialog.Dispose() }
 }
 
-function Start-Scan {
+function Start-Scan([switch]$ApplyUpdates) {
+    if ($script:job -or $script:installer) { return }
+    $script:applyAfterScan = [bool]$ApplyUpdates
     $script:fresh = $false
     $status.Text = 'Checking Windows Update and official manufacturer sources...'
     try {
@@ -335,24 +351,23 @@ function Start-Scan {
             Invoke-HardwareCheck $settings
         }
         Update-Controls
-    } catch { $status.Text = "Could not start the scan. $($_.Exception.Message)" }
+    } catch { $script:applyAfterScan=$false; $status.Text = "Could not start the scan. $($_.Exception.Message)" }
 }
 
 function Update-Controls {
     $busy = $null -ne $script:job -or $null -ne $script:installer
-    foreach ($button in @($scan, $options, $editSource, $openSource)) { $button.Enabled = !$busy }
-    $bios.Enabled = !$busy -and [bool]$script:settings.Bios
-    $install.Enabled = !$busy -and $script:fresh -and $script:snapshot.WindowsUpdateOK -and @($script:snapshot.Offers | Where-Object { $_ }).Count -gt 0
-    $install.BackColor = if ($install.Enabled) { [Drawing.Color]::FromArgb(0, 91, 99) } else { [Drawing.SystemColors]::ControlLight }
-    $install.ForeColor = if ($install.Enabled) { [Drawing.Color]::White } else { [Drawing.SystemColors]::GrayText }
+    $primary.Enabled = !$busy
+    $settingsMenu.Enabled = !$busy
+    $biosItem.Enabled = !$busy -and [bool]$script:settings.Bios
+    $primary.Text = if ($script:job) { 'Checking...' } elseif ($script:installer) { 'Updating...' } else { 'Check & Update All' }
 }
 
 function Start-DriverInstallation {
-    if (!$script:fresh -or $script:job -or $script:installer -or !$script:snapshot.WindowsUpdateOK) { return }
+    if (!(Test-CanInstallSnapshot $script:snapshot $script:fresh ($script:job -or $script:installer))) { return }
     $offers = @($script:snapshot.Offers)
     if (!$offers.Count) { return }
     $answer = [Windows.Forms.MessageBox]::Show($form,
-        "Install $($offers.Count) Windows Update driver package(s) shown in the Windows Update tab? Windows will request administrator approval. Review the results for any restart requirement.",
+        "Install $($offers.Count) supported Windows Update driver package(s)? Excluded offers and manufacturer packages requiring manual review are not included. Windows will request administrator approval. Review the results for any restart requirement.",
         'Update all drivers', 'OKCancel', 'Question', 'Button2')
     if ($answer -ne 'OK') { return }
     try {
@@ -386,47 +401,53 @@ $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object Drawing.Size(1160, 680)
 $form.MinimumSize = New-Object Drawing.Size(870, 500)
 $form.AutoScaleMode = 'Dpi'
+$menu = New-Object Windows.Forms.MenuStrip
+$settingsMenu = [Windows.Forms.ToolStripMenuItem]::new('Settings')
+$preferencesItem = [Windows.Forms.ToolStripMenuItem]::new('Preferences...')
+$unsupportedItem = [Windows.Forms.ToolStripMenuItem]::new('Unsupported items...')
+$exclusionsItem = [Windows.Forms.ToolStripMenuItem]::new('Windows Update exclusions...')
+$editSourceItem = [Windows.Forms.ToolStripMenuItem]::new('Edit selected source...')
+$biosItem = [Windows.Forms.ToolStripMenuItem]::new('BIOS / USB guide...')
+$settingsMenu.DropDownItems.AddRange([Windows.Forms.ToolStripItem[]]@($preferencesItem,$unsupportedItem,$exclusionsItem,[Windows.Forms.ToolStripSeparator]::new(),$editSourceItem,$biosItem))
+$aboutItem = [Windows.Forms.ToolStripMenuItem]::new('About')
+$helpItem = [Windows.Forms.ToolStripMenuItem]::new('Help')
+$menu.Items.AddRange([Windows.Forms.ToolStripItem[]]@($settingsMenu,$aboutItem,$helpItem))
+$form.MainMenuStrip=$menu
 
 $layout = New-Object Windows.Forms.TableLayoutPanel
 $layout.Dock = 'Fill'
 $layout.ColumnCount = 1; $layout.RowCount = 5
 $layout.Padding = New-Object Windows.Forms.Padding(14, 11, 14, 9)
-[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 49))
+[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 59))
 [void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 45))
 [void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent', 100))
 [void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 87))
 [void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 27))
 $form.Controls.Add($layout)
 $actions = New-Object Windows.Forms.FlowLayoutPanel
-$actions.Dock = 'Fill'; $actions.WrapContents = $false; $actions.AutoScroll = $true
-$scan = New-Button 'Check for updates'
-$install = New-Button 'Update All'
-$install.BackColor = [Drawing.Color]::FromArgb(0, 91, 99); $install.ForeColor = [Drawing.Color]::White
-$install.FlatStyle = 'Flat'
-$editSource = New-Button 'Edit source'
-$openSource = New-Button 'Open source'
-$bios = New-Button 'BIOS / USB guide'
-$options = New-Button 'Settings'
-$repoLink = New-Button 'GitHub releases'
-$actions.Controls.AddRange(@($scan, $install, $editSource, $openSource, $bios, $options, $repoLink))
+$actions.Dock = 'Fill'; $actions.WrapContents = $false; $actions.AutoScroll = $false
+$primary = New-Button 'Check & Update All'
+$primary.UseMnemonic=$false
+$primary.Font=[Drawing.Font]::new('Segoe UI',11,[Drawing.FontStyle]::Bold)
+$primary.BackColor=[Drawing.Color]::FromArgb(0,91,99)
+$primary.ForeColor=[Drawing.Color]::White
+$primary.FlatStyle='Flat'
+$primary.Padding=[Windows.Forms.Padding]::new(18,7,18,7)
+$actions.Controls.Add($primary)
+$form.AcceptButton=$primary
 $layout.Controls.Add($actions, 0, 0)
 $summary = New-Object Windows.Forms.Label
 $summary.Dock = 'Fill'
 $summary.AutoEllipsis = $true
 $layout.Controls.Add($summary, 0, 1)
 
-$tabs = New-Object Windows.Forms.TabControl
-$tabs.Dock = 'Fill'
-$hardwarePage = New-Object Windows.Forms.TabPage('Hardware and manufacturer sources')
-$driverPage = New-Object Windows.Forms.TabPage('Windows Update offers')
-$hardware = New-Grid ([ordered]@{ Hardware = 88; Manufacturer = 101; 'Model / device' = 164; Installed = 74; 'Vendor version' = 78; Result = 139 })
-$drivers = New-Grid ([ordered]@{ Package = 150; Class = 55; 'Driver date' = 50; Eligibility = 48; Reason = 180 })
-$drivers.DefaultCellStyle.WrapMode = 'True'
-$drivers.AutoSizeRowsMode = 'AllCells'
-$hardwarePage.Controls.Add($hardware)
-$driverPage.Controls.Add($drivers)
-$tabs.TabPages.AddRange(@($hardwarePage, $driverPage))
-$layout.Controls.Add($tabs, 0, 2)
+$hardware = New-Grid ([ordered]@{ Device=190; Installed=80; Available=80; Status=170; Source=80 })
+$hardware.Columns.Remove('Source')
+$sourceColumn=[Windows.Forms.DataGridViewLinkColumn]::new()
+$sourceColumn.Name='Source'; $sourceColumn.HeaderText='Details'; $sourceColumn.FillWeight=80
+[void]$hardware.Columns.Add($sourceColumn)
+$hardware.DefaultCellStyle.WrapMode='True'; $hardware.AutoSizeRowsMode='AllCells'
+$layout.Controls.Add($hardware, 0, 2)
 
 $details = New-Object Windows.Forms.TextBox
 $details.Dock = 'Fill'; $details.ReadOnly = $true; $details.Multiline = $true; $details.ScrollBars = 'Vertical'
@@ -435,33 +456,28 @@ $status = New-Object Windows.Forms.Label
 $status.Dock = 'Fill'
 $status.Text = if ($startupNotice) { $startupNotice } else { 'Run Check for updates to refresh Windows Update offers and manufacturer versions.' }
 $layout.Controls.Add($status, 0, 4)
+$form.Controls.Add($menu)
 
-$scan.Add_Click({ Start-Scan })
-$install.Add_Click({ Start-DriverInstallation })
-$editSource.Add_Click({ Edit-Source })
-$openSource.Add_Click({
-    $selected = Get-SelectedRow
-    if ($selected -and $selected.Url) { Open-Link $selected.Url }
-    else { Show-Message 'Select a hardware row with a manufacturer link, or add one using Edit source.' }
-})
-$options.Add_Click({ Edit-Settings })
-$bios.Add_Click({ Show-BiosGuide })
-$repoLink.Add_Click({ Open-Link $script:snapshot.Repository.ReleaseUrl })
-$drivers.Add_SelectionChanged({
-    if ($drivers.SelectedRows.Count -gt 0 -and !$script:job) {
-        $offer = $drivers.SelectedRows[0].Tag
-        if ($offer) {
-            $reason = if ($offer.Reasons) { @($offer.Reasons) -join ' ' } else { 'Eligible for Update All after confirmation.' }
-            $details.Lines = [string[]]@($offer.Title, $reason, "Windows Update class: $($offer.Class)   |   Hardware ID: $($offer.HardwareId)", 'Excluded offers can be reviewed in Windows Update. Manufacturer packages use the hardware tab and Open source.')
-        }
+$primary.Add_Click({ Start-Scan -ApplyUpdates })
+$preferencesItem.Add_Click({ Edit-Settings; Update-Controls })
+$unsupportedItem.Add_Click({ Show-UnsupportedItems })
+$exclusionsItem.Add_Click({ Show-WindowsExclusions })
+$editSourceItem.Add_Click({ Edit-Source })
+$biosItem.Add_Click({ Show-BiosGuide })
+$aboutItem.Add_Click({ $identity=@($script:snapshot.Inventory|Where-Object Kind -in 'System','Motherboard','CPU','RAM'|ForEach-Object {$_.Kind+': '+$_.Model});Show-Message ("Hardware Update Launcher $script:LauncherVersion`r`nMIT-licensed Windows 10/11 x64 utility.`r`nSource: https://github.com/SJB-gif/HardwareUpdateLauncher`r`n`r`n"+($identity -join "`r`n")) })
+$helpItem.Add_Click({ Show-Message "Check & Update All refreshes hardware and manufacturer checks, then asks before applying supported Windows Update packages.`r`n`r`nReview update links open official manufacturer pages for packages requiring manual installation. Unsupported items and excluded Windows Update offers are listed in Settings. Windows-managed components are hidden.`r`n`r`nFirmware flashing and reboots are never performed automatically." })
+$hardware.Add_CellContentClick({
+    param($sender,$eventArgs)
+    if($eventArgs.RowIndex -ge 0 -and $sender.Columns[$eventArgs.ColumnIndex].Name -eq 'Source') {
+        $selected=$sender.Rows[$eventArgs.RowIndex].Tag
+        if($selected.Url){Open-Link $selected.Url}
     }
 })
 $hardware.Add_SelectionChanged({
     $selected = Get-SelectedRow
     if ($selected -and !$script:job -and !$script:installer) {
         $row = $selected.Device
-        $modelInfo = @("Part number: $($row.Part)", "Revision: $($row.Revision)") -join '   |   '
-        $status.Text = $modelInfo.TrimEnd() + $(if ($row.IDs.Count) { "   |   $($row.IDs[0])" })
+        $status.Text = $row.Kind + ' | ' + (Get-HardwareVendor $row)
         if ($selected.Check) {
             $details.Lines = [string[]]@($selected.Check.Status, $selected.Check.Detail, $selected.Check.Url)
         }
@@ -471,6 +487,8 @@ $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({
     if ($script:job -and $script:job.State -in @('Completed', 'Failed', 'Stopped')) {
+        $apply = $script:applyAfterScan
+        $script:applyAfterScan=$false
         try {
             $result = Receive-Job -Job $script:job -ErrorAction Stop
             if (!$result -or !$result.CapturedAt) { throw 'No inventory was returned.' }
@@ -480,12 +498,16 @@ $timer.Add_Tick({
             Refresh-View
             $eligibleCount = @($script:snapshot.Offers | Where-Object { $_ }).Count
             $excludedCount = @($script:snapshot.ExcludedOffers | Where-Object { $_ }).Count
-            $status.Text = "Check complete. Windows Update: $eligibleCount eligible, $excludedCount excluded. Manufacturer results are in the hardware tab."
-        } catch { $status.Text = "Scan failed. $($_.Exception.Message)" }
+            $status.Text = "Check complete. $eligibleCount supported package(s) ready; $excludedCount excluded offers are in Settings."
+        } catch { $apply=$false; $status.Text = "Scan failed. $($_.Exception.Message)" }
         finally {
             Remove-Job -Job $script:job -Force
             $script:job = $null
             Update-Controls
+        }
+        if($apply) {
+            if(Test-CanInstallSnapshot $script:snapshot $script:fresh $false){Start-DriverInstallation}
+            else {Show-Message 'No automatically installable updates were found. Manufacturer updates labelled Review update require manual installation. See Settings for unsupported items and excluded offers.'}
         }
     }
     if ($script:installer) {
@@ -506,29 +528,35 @@ $form.Add_Shown({
             try {
                 $form.DrawToBitmap($bitmap, [Drawing.Rectangle]::new(0, 0, $form.Width, $form.Height))
                 $bitmap.Save(($previewPath + '-hardware.png'), [Drawing.Imaging.ImageFormat]::Png)
-                $tabs.SelectedTab = $driverPage
-                [Windows.Forms.Application]::DoEvents()
-                $form.DrawToBitmap($bitmap, [Drawing.Rectangle]::new(0, 0, $form.Width, $form.Height))
-                $bitmap.Save(($previewPath + '-offers.png'), [Drawing.Imaging.ImageFormat]::Png)
             } finally { $bitmap.Dispose() }
+            Show-UnsupportedItems -Preview
         }
         $script:smokeResult = [pscustomobject]@{
             Version = $script:LauncherVersion
             Visible = $form.Visible
             HardwareRows = $hardware.Rows.Count
-            DriverRows = $drivers.Rows.Count
+            DriverRows = @($script:snapshot.Offers | Where-Object { $_ }).Count
             ExcludedDriverRows = @($script:snapshot.ExcludedOffers | Where-Object { $_ }).Count
             Summary = $summary.Text
-            BiosEnabled = $bios.Enabled
-            UpdateAllEnabled = $install.Enabled
+            BiosEnabled = $biosItem.Enabled
+            UpdateAllEnabled = Test-CanInstallSnapshot $script:snapshot $script:fresh $false
+            UnsupportedCount = $script:unsupportedRows.Count
+            WindowsManagedHidden = $script:hiddenWindowsCount
+            MainDevices = @($hardware.Rows | ForEach-Object { $_.Cells[0].Value })
+            MainButtonCount = $actions.Controls.Count
+            MainActionText = $primary.Text
+            MainActionUsesMnemonic = $primary.UseMnemonic
+            MainActionEnabled = $primary.Enabled
+            MenuItems = @($menu.Items | ForEach-Object Text)
             Is64BitProcess = [Environment]::Is64BitProcess
             ApartmentState = [string][Threading.Thread]::CurrentThread.GetApartmentState()
             ScanStarted = $null -ne $script:job
+            ApplyOnStartup = $script:applyAfterScan
             FreshUpdateAllEnabled = $false
         }
         $script:fresh = $true
         Update-Controls
-        $script:smokeResult.FreshUpdateAllEnabled = $install.Enabled
+        $script:smokeResult.FreshUpdateAllEnabled = Test-CanInstallSnapshot $script:snapshot $script:fresh $false
         $form.Close()
         return
     }

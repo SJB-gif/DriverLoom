@@ -15,6 +15,7 @@ if ($LASTEXITCODE -ne 0 -or $compilerVersion -notmatch '^v(\d+\.\d+)' -or [versi
 }
 & (Join-Path $PSScriptRoot 'Test-Engine.ps1')
 & (Join-Path $PSScriptRoot 'Test-Manufacturers.ps1')
+& (Join-Path $PSScriptRoot 'Test-Coverage.ps1')
 & (Join-Path $PSScriptRoot 'Test-App.ps1')
 $dist = Join-Path $PSScriptRoot 'dist'
 [void][IO.Directory]::CreateDirectory($dist)

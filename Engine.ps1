@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.3'
+$script:LauncherVersion = '0.1.4'
+. (Join-Path $PSScriptRoot 'Coverage.ps1')
 . (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 
 function Save-Json($path, $data) {
@@ -13,13 +14,14 @@ function Save-Json($path, $data) {
     }
 }
 
-function New-HardwareRow($kind, $manufacturer, $model, $part, $revision, $current, $ids) {
+function New-HardwareRow($kind, $manufacturer, $model, $part, $revision, $current, $ids, [string]$provider = '', [string]$infName = '') {
     $fields = @($kind, $manufacturer, $model, $part, $revision)
     $key = ($fields | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() }) -join '|'
     [pscustomobject]@{
         Key = $key; Kind = $kind; Manufacturer = ([string]$manufacturer).Trim()
         Model = ([string]$model).Trim(); Part = ([string]$part).Trim(); Revision = ([string]$revision).Trim()
         Current = ([string]$current).Trim(); IDs = @($ids | Where-Object { $_ } | Select-Object -Unique)
+        Provider = $provider; InfName = $infName
     }
 }
 
@@ -70,17 +72,24 @@ function Get-HardwareInventory {
                 'MEDIA' { 'Audio/video driver' }
                 'HDC' { 'Storage driver' }
                 'SCSIADAPTER' { 'Storage driver' }
+                'BLUETOOTH' { 'Bluetooth driver' }
+                'IMAGE' { 'Camera driver' }
+                'CAMERA' { 'Camera driver' }
+                'PRINTER' { 'Printer driver' }
+                'HIDCLASS' { 'Input device driver' }
                 'SYSTEM' { if ($driver.DeviceID -like 'PCI\*') { 'Chipset/system driver' } }
             }
             if (!$kind) { continue }
             $hardwareId = $null
             $compatibleId = $null
+            $baseRow = New-HardwareRow $kind $driver.Manufacturer $driver.DeviceName $driver.HardWareID '' $driver.DriverVersion @($driver.HardWareID) $driver.DriverProviderName $driver.InfName
+            if (Test-WindowsManagedHardware $baseRow) { $rows.Add($baseRow); continue }
             try {
                 $hardwareId = (Get-PnpDeviceProperty -InstanceId $driver.DeviceID -KeyName 'DEVPKEY_Device_HardwareIds').Data
                 $compatibleId = (Get-PnpDeviceProperty -InstanceId $driver.DeviceID -KeyName 'DEVPKEY_Device_CompatibleIds' -ErrorAction SilentlyContinue).Data
             } catch { }
             $ids = @($hardwareId) + @($driver.HardWareID) + @($compatibleId) + @($driver.CompatID)
-            $rows.Add((New-HardwareRow $kind $driver.Manufacturer $driver.DeviceName $driver.HardWareID '' $driver.DriverVersion $ids))
+            $rows.Add((New-HardwareRow $kind $driver.Manufacturer $driver.DeviceName $driver.HardWareID '' $driver.DriverVersion $ids $driver.DriverProviderName $driver.InfName))
         }
     } catch { $warnings.Add("Driver inventory: $_") }
     $hardwareRows = $rows.ToArray()
@@ -89,8 +98,10 @@ function Get-HardwareInventory {
         if (Get-AmdChipsetSource $hardwareRows) {
             $rows.Add((New-HardwareRow 'Chipset package' 'AMD' 'AMD Chipset Software' $board.Product $board.Version $packages.Chipset @()))
         }
-        if (Get-AmdGraphicsSource $hardwareRows) {
-            $rows.Add((New-HardwareRow 'GPU software' 'AMD' 'AMD Software: Adrenalin Edition' '' '' $packages.Graphics @()))
+        $amdGpus = @($hardwareRows | Where-Object { $_.Kind -eq 'GPU driver' -and (Get-AmdGraphicsSource $hardwareRows $_) })
+        foreach ($gpu in $amdGpus) {
+            $targetModel = if ($amdGpus.Count -eq 1) { '' } else { $gpu.Model }
+            $rows.Add((New-HardwareRow 'GPU software' 'AMD' 'AMD Software: Adrenalin Edition' $targetModel '' $packages.Graphics @()))
         }
     }
     [pscustomobject]@{
@@ -140,7 +151,7 @@ function Get-HttpsUri([string]$value) {
 function Read-WebSource([string]$url, [int]$limit = 2097152) {
     $uri = Get-HttpsUri $url
     $request = [Net.HttpWebRequest]::Create($uri)
-    $request.UserAgent = 'HardwareUpdateLauncher/0.1.3'
+    $request.UserAgent = 'HardwareUpdateLauncher/0.1.4'
     $request.AllowAutoRedirect = $false
     $request.Timeout = 12000
     $request.ReadWriteTimeout = 12000
@@ -205,7 +216,7 @@ function Get-RepositoryCatalog([string]$repo, $warnings) {
 
 function Get-SamsungSource($row) {
     if ($row.Kind -ne 'Storage firmware') { return }
-    $disk = [regex]::Match($row.Model, '^(?:(?:NVMe|ATA)\s+)?Samsung SSD (990 PRO|990 EVO Plus|990 EVO|980 PRO)(?: with Heatsink)?(?:\s+\d+(?:GB|TB))?(?:\s+(?:SCSI|ATA|NVMe) Disk Device)?$', 'IgnoreCase')
+    $disk = [regex]::Match($row.Model, '^(?:(?:NVMe|ATA)\s+)?Samsung SSD (990 PRO|990 EVO Plus|990 EVO|980 PRO|980|970 EVO Plus|970 EVO|970 PRO|960 EVO|960 PRO|950 PRO)(?: with Heatsink)?(?:\s+\d+(?:GB|TB))?(?:\s+(?:SCSI|ATA|NVMe) Disk Device)?$', 'IgnoreCase')
     if (!$disk.Success) { return }
     $model = [regex]::Escape($disk.Groups[1].Value).Replace('\ ', '\s+')
     [pscustomobject]@{
@@ -231,6 +242,7 @@ function Get-VendorResults($inventory, $settings, $warnings, [string]$osVersion 
     try { $target = Get-WindowsDriverTarget $osVersion } catch { $warnings.Add($_.Exception.Message) }
     $checks = foreach ($row in $inventory) {
         if ($row.Kind -eq 'BIOS' -and !$settings.Bios) { continue }
+        if (Test-WindowsManagedHardware $row) { continue }
         $portal = Get-VendorPortal $row $system
         $source = @($settings.Sources | Where-Object { $_ -and $_.Key -eq $row.Key }) | Select-Object -First 1
         $localSource = [bool]$source
@@ -252,7 +264,8 @@ function Get-VendorResults($inventory, $settings, $warnings, [string]$osVersion 
             $source = Get-SamsungSource $row
             $builtInSource = [bool]$source
         }
-        $check = [pscustomobject]@{ Key = $row.Key; Current = $row.Current; Available = ''; Url = $portal; Status = 'Not checked; no automatic manufacturer adapter'; Detail = 'Save an exact manufacturer source with a version pattern, or review the official support page.'; Checked = $false }
+        $route = Get-OfficialSupportRoute $row $inventory
+        $check = [pscustomobject]@{ Key = $row.Key; Current = $row.Current; Available = ''; Url = $route.Url; Status = 'Unsupported automatic check'; Detail = $route.Reason; Checked = $false }
         if ($row.Kind -in 'CPU', 'RAM', 'System', 'Motherboard' -and !$source) { $check.Status = 'Inventory only'; $check.Detail = 'This identity is used for hardware and package matching.' }
         elseif (!$source -and $row.Kind -eq 'Chipset/system driver' -and $row.Manufacturer -match 'AMD|Advanced Micro Devices' -and (Get-AmdChipsetSource $inventory)) {
             $check.Status = 'See AMD Chipset Software package check'; $check.Url = Get-AmdChipsetSource $inventory
@@ -343,6 +356,10 @@ function Get-WindowsOfferReport($updates, $warnings) {
         }
     }
     [pscustomobject]@{ Offers = $eligible; ExcludedOffers = $excluded.ToArray(); Total = @($updates).Count }
+}
+
+function Test-CanInstallSnapshot($snapshot, [bool]$fresh, [bool]$busy) {
+    return (!$busy -and $fresh -and $snapshot.WindowsUpdateOK -and @($snapshot.Offers | Where-Object { $_ }).Count -gt 0)
 }
 
 function Search-WindowsDrivers($session) {

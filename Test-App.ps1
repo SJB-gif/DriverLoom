@@ -22,6 +22,12 @@ function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled) {
     Assert-Startup $true $result.Is64BitProcess "$name 64-bit host"
     Assert-Startup 'STA' $result.ApartmentState "$name apartment"
     Assert-Startup $false $result.ScanStarted "$name no network scan in test mode"
+    Assert-Startup $false $result.ApplyOnStartup "$name startup scan cannot auto-install"
+    Assert-Startup 1 $result.MainButtonCount "$name exactly one primary action"
+    Assert-Startup 'Check & Update All' $result.MainActionText "$name combined action label"
+    Assert-Startup $false $result.MainActionUsesMnemonic "$name ampersand remains visible"
+    Assert-Startup $true $result.MainActionEnabled "$name idle action can check even with no installable offers"
+    Assert-Startup 'Settings,About,Help' ($result.MenuItems -join ',') "$name top menu"
     Assert-Startup $false $result.UpdateAllEnabled "$name saved offers cannot be installed"
     Assert-Startup $biosEnabled $result.BiosEnabled "$name BIOS opt-in"
     return $result
@@ -36,6 +42,8 @@ try {
         Inventory = @(
             (New-HardwareRow 'GPU driver' 'Example' 'Test GPU' 'PCI TEST' '' '1.0' @('PCI TEST'))
             (New-HardwareRow 'BIOS' 'Example' 'Test board' '' '1' '1.0' @())
+            (New-HardwareRow 'Storage driver' '(Standard controller)' 'Standard NVM Express Controller' '' '' '10.0.26100.1' @() 'Microsoft' 'stornvme.inf')
+            (New-HardwareRow 'Storage firmware' 'Corsair' 'Unsupported test SSD' '' '' '1.0' @())
         )
         Checks = @(); Warnings = @(); Repository = $null; WindowsUpdateOK = $true; WindowsUpdateOfferCount = 3
         Offers = @([pscustomobject]@{ Title = 'Test offer'; Class = 'Display'; HardwareId = 'PCI TEST'; Date = '2026-11-19' })
@@ -44,20 +52,25 @@ try {
             [pscustomobject]@{ Title = 'Test firmware'; Class = 'Firmware'; HardwareId = 'TEST FIRMWARE'; Date = '2026-11-19'; Reasons = @('Firmware/BIOS is excluded from Update All; use the manufacturer workflow.') }
         )
     }
+    $snapshot.Checks=@([pscustomobject]@{Key=$snapshot.Inventory[0].Key;Current='1.0';Available='1.2';Status='Newer at source';Checked=$true;Detail='Fixture manufacturer result.';Url='https://example.com/driver'})
     $cached = Invoke-StartupCase 'cached' $snapshot $false
-    Assert-Startup 1 $cached.HardwareRows 'BIOS hidden by default'
-    Assert-Startup 3 $cached.DriverRows 'eligible and excluded offers render'
+    Assert-Startup 2 $cached.HardwareRows 'checked manufacturer and eligible Windows Update rows only'
+    Assert-Startup 1 $cached.DriverRows 'only eligible Windows Update packages are shown in main results'
     Assert-Startup 2 $cached.ExcludedDriverRows 'excluded offers remain visible'
     Assert-Startup $true $cached.FreshUpdateAllEnabled 'fresh eligible offer can enable Update All'
-    Assert-Startup $true ($cached.Summary -like '*3 offered; 1 eligible; 2 excluded*') 'summary distinguishes offered and excluded counts'
+    Assert-Startup 1 $cached.UnsupportedCount 'unsupported devices are separated into settings'
+    Assert-Startup 1 $cached.WindowsManagedHidden 'Windows-managed controller removed from main results'
+    Assert-Startup $false ($cached.MainDevices -contains 'Standard NVM Express Controller') 'inbox controller absent from results'
+    Assert-Startup $false ($cached.MainDevices -contains 'Unsupported test SSD') 'unsupported firmware absent from results'
+    Assert-Startup $true ($cached.Summary -like '*1 Windows Update package(s) ready*') 'summary distinguishes installable packages'
     $snapshot.Offers = @()
     $snapshot.WindowsUpdateOfferCount = 2
     $excludedOnly = Invoke-StartupCase 'excluded-only' $snapshot $false
-    Assert-Startup 2 $excludedOnly.DriverRows 'excluded rows render when none are eligible'
+    Assert-Startup 0 $excludedOnly.DriverRows 'excluded packages stay out of main results'
     Assert-Startup $false $excludedOnly.UpdateAllEnabled 'excluded offers never enable Update All'
     Assert-Startup $false $excludedOnly.FreshUpdateAllEnabled 'fresh excluded-only scan cannot enable Update All'
     $optIn = Invoke-StartupCase 'bios-opt-in' $snapshot $true
-    Assert-Startup 2 $optIn.HardwareRows 'BIOS inventory after opt-in'
+    Assert-Startup 1 $optIn.HardwareRows 'unsupported BIOS does not add an unchecked row to main results'
 
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'

@@ -107,5 +107,5 @@ $script:wrongBoard = $false
 $script:failedSource = $true
 $check = Get-AutomaticManufacturerCheck $gpu $inventory $target @{}
 Assert-Manufacturer $false $check.Checked 'offline manufacturer is not reported current'
-Assert-Manufacturer 'Not checked; manufacturer lookup failed' $check.Status 'source failure is explicit'
+Assert-Manufacturer 'Unsupported automatic check; source unavailable' $check.Status 'source failure is explicit'
 Write-Output 'Manufacturer checks passed: exact GPU/board/OS matching, NVIDIA version conversion, AMD package numbering, component matching, caching and failure handling.'

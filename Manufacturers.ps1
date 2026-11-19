@@ -53,10 +53,11 @@ function Convert-NvidiaInstalledVersion([string]$installed) {
 
 function Get-NvidiaCheck($row, $target, $cache) {
     $model = Get-NormalizedGpuName $row.Model
-    $match = [regex]::Match($model, '^GeForce (RTX|GTX) (\d{2})\d{2}(?: (?:Ti|SUPER|Laptop GPU))*$', 'IgnoreCase')
+    $match = [regex]::Match($model, '^GeForce (RTX|GTX|GT|GTS) (\d{1,2})\d{2}(?: (?:Ti|SUPER|Laptop GPU))*$', 'IgnoreCase')
     if (!$match.Success) { return $null }
     $seriesName = if ($match.Groups[1].Value -eq 'RTX') { 'GeForce RTX ' + $match.Groups[2].Value + ' Series' }
         elseif ($match.Groups[2].Value -eq '16') { 'GeForce 16 Series' }
+        elseif ($match.Groups[2].Value.Length -eq 1) { 'GeForce ' + $match.Groups[2].Value + '00 Series' }
         else { 'GeForce ' + $match.Groups[2].Value + ' Series' }
     if ($model -match 'Laptop GPU$') { $seriesName += ' (Notebooks)' }
     $seriesXml = ConvertFrom-VendorXml (Get-VendorPage 'https://www.nvidia.com/Download/API/lookupValueSearch.aspx?TypeID=2&ParentID=1' $cache)
@@ -76,17 +77,18 @@ function Get-NvidiaCheck($row, $target, $cache) {
         $name = [Uri]::UnescapeDataString([string]$info.Name)
         $osName = [Uri]::UnescapeDataString([string]$info.OSName)
         $supported = @($info.series | ForEach-Object { $_.products } | ForEach-Object { Get-NormalizedGpuName ([Uri]::UnescapeDataString([string]$_.productName)) })
-        if ($info.Success -eq '1' -and $name -eq 'GeForce Game Ready Driver' -and $info.IsWHQL -eq '1' -and $info.IsBeta -eq '0' -and
+        if ($info.Success -eq '1' -and $name -match '^GeForce (?:Game Ready|Security Update) Driver$' -and $info.IsWHQL -eq '1' -and $info.IsBeta -eq '0' -and
             $info.IsActive -eq '1' -and $osName -match ('^Windows ' + $target.Family + '(?: 64-bit)?$') -and $model -in $supported -and
             $info.Version -match '^\d{3}\.\d{2}$') { $info }
     })
     $latest = $candidates | Sort-Object { [version]$_.Version } -Descending | Select-Object -First 1
-    if (!$latest) { throw 'No non-beta WHQL Game Ready driver matches the exact GPU and Windows version.' }
+    if (!$latest) { throw 'No non-beta WHQL GeForce driver matches the exact GPU and Windows version.' }
     $details = Get-HttpsUri ([string]$latest.DetailsURL)
     if ($details.DnsSafeHost -ne 'www.nvidia.com' -or $details.AbsolutePath -notmatch '^/en-us/drivers/details/\d+/$') { throw 'NVIDIA returned an unexpected driver details URL.' }
     $installed = Convert-NvidiaInstalledVersion $row.Current
     $status = if ($installed) { Compare-ReportedVersion $installed $latest.Version } else { 'Vendor version found; installed NVIDIA version needs review' }
-    New-ManufacturerCheck $row $details.AbsoluteUri $latest.Version $status "NVIDIA WHQL Game Ready; exact product $model; Windows $($target.Family) x64. Installed Windows driver $($row.Current) corresponds to NVIDIA $installed. Vendor packages are reviewed and installed from the official source."
+    $channel=[Uri]::UnescapeDataString([string]$latest.Name)
+    New-ManufacturerCheck $row $details.AbsoluteUri $latest.Version $status "NVIDIA WHQL $channel; exact product $model; Windows $($target.Family) x64. Installed Windows driver $($row.Current) corresponds to NVIDIA $installed. Vendor packages are reviewed and installed from the official source."
 }
 
 function Get-AmdChipsetSource($inventory) {
@@ -100,11 +102,25 @@ function Get-AmdChipsetSource($inventory) {
     return "https://www.amd.com/en/support/downloads/drivers.html/chipsets/$socket/$chipset.html"
 }
 
-function Get-AmdGraphicsSource($inventory) {
-    $gpu = $inventory | Where-Object { $_.Kind -eq 'GPU driver' -and $_.Model -match '^AMD Radeon(?:\(TM\))? Graphics$' } | Select-Object -First 1
+function Get-AmdGraphicsSource($inventory, $gpu = $null) {
+    if (!$gpu) {
+        foreach ($candidate in @($inventory | Where-Object Kind -eq 'GPU driver')) {
+            $source = Get-AmdGraphicsSource $inventory $candidate
+            if ($source) { return $source }
+        }
+        return $null
+    }
+    $rx = [regex]::Match($gpu.Model, '^(?:AMD )?Radeon(?:\(TM\))? RX ([5-9]\d{3})(?: (XT|XTX|GRE))?$', 'IgnoreCase')
+    if ($rx.Success) {
+        $family = $rx.Groups[1].Value.Substring(0,1) + '000'
+        $product = 'amd-radeon-rx-' + $rx.Groups[1].Value
+        if ($rx.Groups[2].Success) { $product += '-' + $rx.Groups[2].Value.ToLowerInvariant() }
+        return "https://www.amd.com/en/support/downloads/drivers.html/graphics/radeon-rx/radeon-rx-$family-series/$product.html"
+    }
+    if ($gpu.Model -notmatch '^AMD Radeon(?:\(TM\))? Graphics$') { return $null }
     $cpu = $inventory | Where-Object Kind -eq 'CPU' | Select-Object -First 1
     if (!$gpu -or !$cpu) { return $null }
-    $match = [regex]::Match($cpu.Model, '^AMD Ryzen ([3579]) ([789]\d{3}(?:X3D|XT|X|G|GE|F)?)\s+(?:\d+-Core )?Processor\s*$', 'IgnoreCase')
+    $match = [regex]::Match($cpu.Model, '^AMD Ryzen ([3579]) ([1-9]\d{3}(?:X3D|XT|X|G|GE|F)?)\s+(?:\d+-Core )?Processor\s*$', 'IgnoreCase')
     if (!$match.Success) { return $null }
     $family = $match.Groups[2].Value.Substring(0,1) + '000'
     $product = ('amd-ryzen-' + $match.Groups[1].Value + '-' + $match.Groups[2].Value).ToLowerInvariant()
@@ -136,12 +152,17 @@ function Get-AmdCheck($row, $inventory, $target, $cache) {
         $available = Get-AmdPackageVersion (Get-VendorPage $url $cache) $target 'AMD Chipset Drivers'
         return New-ManufacturerCheck $row $url $available (Compare-ReportedVersion $row.Current $available) "AMD's chipset page matches the detected motherboard chipset and Windows $($target.Family) x64. This compares the installed AMD Chipset Software package, not SMBus/PCI component version numbers. Review the official release notes before installing."
     }
-    if ($row.Kind -in 'GPU software', 'GPU driver' -and $row.Manufacturer -match 'AMD|Advanced Micro Devices') {
-        $url = Get-AmdGraphicsSource $inventory
-        if (!$url -or ($row.Kind -eq 'GPU driver' -and $row.Model -notmatch '^AMD Radeon(?:\(TM\))? Graphics$')) { return $null }
+    if ($row.Kind -in 'GPU software', 'GPU driver' -and (Get-HardwareVendor $row) -eq 'AMD') {
+        $gpu = if ($row.Kind -eq 'GPU driver') { $row } else {
+            $matching = @($inventory | Where-Object { $_.Kind -eq 'GPU driver' -and (!$row.Part -or $_.Model -eq $row.Part) -and (Get-AmdGraphicsSource $inventory $_) })
+            if ($matching.Count -ne 1) { return $null }
+            $matching[0]
+        }
+        $url = Get-AmdGraphicsSource $inventory $gpu
+        if (!$url) { return $null }
         $available = Get-AmdPackageVersion (Get-VendorPage $url $cache) $target 'AMD Software: Adrenalin Edition'
         $status = if ($row.Kind -eq 'GPU software') { Compare-ReportedVersion $row.Current $available } else { 'Vendor package found; compare the AMD Software row' }
-        return New-ManufacturerCheck $row $url $available $status "AMD Adrenalin package for the exact detected Ryzen processor and Windows $($target.Family) x64. The package version is compared only with installed AMD Software; it is not a Windows display-driver version."
+        return New-ManufacturerCheck $row $url $available $status "AMD Adrenalin package for the detected $($gpu.Model) product and Windows $($target.Family) x64. The package version is compared only with installed AMD Software; it is not a Windows display-driver version."
     }
     return $null
 }
@@ -156,6 +177,8 @@ function Get-AsusCheck($row, $inventory, $target, $cache) {
         elseif ($row.Model -match 'MediaTek.*(?:MT7922|RZ616)') { $category = 'Wireless'; $pattern = '(?:AMD\s+Wi-?Fi|MediaTek.*(?:7922|RZ616))' }
     } elseif ($row.Kind -eq 'Audio/video driver' -and $row.Model -eq 'Realtek USB Audio' -and ($row.IDs -join ' ') -match 'USB\\(?:VID_0BDA&PID_40(?:80|82)|VID_0B05&PID_1A52)') {
         $category = 'Audio'; $pattern = 'Realtek\s+USB\s+Audio'
+    } elseif ($row.Kind -eq 'Bluetooth driver' -and (Get-HardwareVendor $row) -eq 'MediaTek' -and ($row.IDs -join ' ') -match 'USB\\VID_0E8D&PID_061[68]') {
+        $category = 'Bluetooth'; $pattern = '(?:AMD\s+Bluetooth|MediaTek.*(?:7922|RZ616))'
     }
     if (!$category) { return $null }
     $url = 'https://www.asus.com/supportonly/' + [Uri]::EscapeDataString($board.Model) + '/helpdesk_download/'
@@ -173,17 +196,39 @@ function Get-AsusCheck($row, $inventory, $target, $cache) {
 
 function Get-AutomaticManufacturerCheck($row, $inventory, $target, $cache) {
     try {
-        if ($row.Kind -eq 'GPU driver' -and $row.Manufacturer -match 'NVIDIA') {
+        if ($row.Kind -eq 'GPU driver' -and (Get-HardwareVendor $row) -eq 'NVIDIA') {
             $check = Get-NvidiaCheck $row $target $cache
             if ($check) { return $check }
         }
         $check = Get-AmdCheck $row $inventory $target $cache
         if ($check) { return $check }
+        $check = Get-IntelWirelessCheck $row $target $cache
+        if ($check) { return $check }
         return Get-AsusCheck $row $inventory $target $cache
     } catch {
-        $url = Get-VendorPortal $row ($inventory | Where-Object Kind -eq 'System' | Select-Object -First 1)
-        New-ManufacturerCheck $row $url '' 'Not checked; manufacturer lookup failed' $_.Exception.Message $false
+        $route = Get-OfficialSupportRoute $row $inventory
+        New-ManufacturerCheck $row $route.Url '' 'Unsupported automatic check; source unavailable' $_.Exception.Message $false
     }
+}
+
+function Get-IntelWirelessCheck($row, $target, $cache) {
+    if ($row.Kind -ne 'Network driver' -or (Get-HardwareVendor $row) -ne 'Intel') { return $null }
+    $model = [regex]::Match($row.Model, '\b(AX\d{3}|BE\d{3}|9[2456]\d{2})\b', 'IgnoreCase')
+    if (!$model.Success) { return $null }
+    $token = $model.Value.ToUpperInvariant()
+    $url = if ($token -eq 'AX200') { 'https://www.intel.com/content/www/us/en/download/915475/intel-wireless-wi-fi-drivers-for-intel-wi-fi-6-ax200.html' }
+        else { 'https://www.intel.com/content/www/us/en/download/19351/intel-wireless-wi-fi-drivers-for-windows-10-and-windows-11.html' }
+    $text = (Convert-HtmlToText (Get-VendorPage $url $cache)) -replace '\s+', ' '
+    $start = $text.IndexOf('This download is valid for the product', [StringComparison]::OrdinalIgnoreCase)
+    if ($start -lt 0) { throw 'Intel did not expose an explicit supported-products list.' }
+    $supported = $text.Substring($start)
+    $end = $supported.IndexOf('Documentation', [StringComparison]::OrdinalIgnoreCase)
+    if ($end -ge 0) { $supported = $supported.Substring(0,$end) }
+    if ($supported -notmatch ('\b' + [regex]::Escape($token) + '\b')) { throw "Intel's current package does not list $token; a legacy or OEM package is required." }
+    if ($text -notmatch ('Windows\W{0,5}' + $target.Family + '\b')) { throw 'Intel package does not list the detected Windows family.' }
+    $versions = @([regex]::Matches($text, 'package\s+installs\s+the\s+Wi.?Fi\s+driver\s+version\s+(?<version>\d+(?:\.\d+){3})', 'IgnoreCase') | ForEach-Object { $_.Groups['version'].Value } | Select-Object -Unique)
+    if ($versions.Count -ne 1) { throw 'Intel did not expose one unambiguous installed driver version; package numbering is not substituted.' }
+    New-ManufacturerCheck $row $url $versions[0] (Compare-ReportedVersion $row.Current $versions[0]) "Intel driver-version metadata explicitly lists $token and Windows $($target.Family). OEM systems may require their customised driver; review the official source before installation."
 }
 
 function Get-InstalledAmdPackages {

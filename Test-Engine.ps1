@@ -45,7 +45,7 @@ Assert-Equal 4 $result.Checks.Count 'disabled BIOS'
 Assert-Equal '31.0.10.2' $result.Checks[0].Available 'saved source'
 Assert-Equal '8B2QJXD7' $result.Checks[1].Available 'Samsung version extraction'
 Assert-Equal 'Newer at source' $result.Checks[1].Status 'Samsung comparison'
-Assert-Equal 'Not checked; no automatic manufacturer adapter' $result.Checks[2].Status 'OEM SSD must use its exact source'
+Assert-Equal 'Unsupported automatic check' $result.Checks[2].Status 'OEM SSD must use its exact source'
 $settings.Bios = $true
 $settings.Sources[0].Url = 'https://example.com/ambiguous'
 $result = Get-VendorResults @($gpu, $bios) $settings $warnings
