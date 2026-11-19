@@ -6,6 +6,12 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
+**Latest tested version: 0.1.10.** The public release is still **0.1.8**. The check-frequency and background settings described below are in the 0.1.10 test build, available from its [successful GitHub Actions run](https://github.com/SJB-gif/DriverLoom/actions/runs/44470264802). Release publishing and signing setup are on hold.
+
+## Code signing policy
+
+[SignPath Foundation](https://signpath.org/) is the planned route for free open-source signing. No application has been submitted and signing is not enabled. See the [code signing policy](CODE_SIGNING_POLICY.md) for the intended process and privacy details.
+
 ## Get started
 
 1. Download and run **DriverLoom-Setup.exe**. Exit DriverLoom first if you are upgrading; if tray mode is enabled, right-click its icon and choose **Exit**. Your settings are kept.
@@ -46,9 +52,9 @@ External services can see normal connection information, including your connecti
 
 ## Support
 
-DriverLoom is a personal, volunteer-maintained project, provided as-is. Individual support, replies, fixes and response times are not guaranteed.
+DriverLoom is a personal, volunteer-maintained project, provided as-is. **No individual support is provided.** Downloading or using the app does not include a support service or a promise of a reply, fix or ongoing maintenance.
 
-Use [GitHub Issues](https://github.com/SJB-gif/DriverLoom/issues) for bug reports. Please do not contact the maintainer through personal email or social accounts. Keep reports free of serial numbers, hardware IDs and other personal information; review any copied diagnostic details before posting. No public support email is provided.
+Optional bug reports belong in [GitHub Issues](https://github.com/SJB-gif/DriverLoom/issues). Reports may not be reviewed or answered. Please do not contact the maintainer through personal email or social accounts. Keep reports free of serial numbers, hardware IDs and other personal information; review any copied diagnostic details before posting. No public support email is provided.
 
 ## Build from source
 
