@@ -196,6 +196,21 @@ try {
     Assert-Startup 1 @($radeonView.MainItems|Where-Object Action -eq 'Download & install').Count 'Radeon offers one download on the comparable software row'
     Assert-Startup 'Download & install' ($radeonView.MainItems|Where-Object Device -eq $software.Model).Action 'Radeon package download takes priority over installed AMD updater'
     Assert-Startup 'CHECK UNAVAILABLE' ($radeonView.MainItems|Where-Object Device -eq $radeon.Model).Status 'display-driver version is not compared with an Adrenalin package version'
+    $board=New-HardwareRow 'Motherboard' 'ASUSTeK' 'ROG STRIX X670E-A GAMING WIFI' '' '' '' @()
+    $asusDevices=@(
+        (New-HardwareRow 'Network driver' 'Intel' 'Intel I225-V' '' '' '1.0.0.0' @('PCI\VEN_8086&DEV_15F3&REV_03')),
+        (New-HardwareRow 'Network driver' 'MediaTek' 'MediaTek Wi-Fi MT7922 RZ616' '' '' '1.0.0.0' @('PCI\VEN_14C3&DEV_0616&SUBSYS_061614C3')),
+        (New-HardwareRow 'Bluetooth driver' 'MediaTek' 'MediaTek Bluetooth Adapter' '' '' '1.0.0.0' @('USB\VID_0489&PID_E0E2&MI_00')),
+        (New-HardwareRow 'Audio/video driver' 'Microsoft' 'Realtek USB Audio' '' '' '1.0.0.0' @('USB\VID_0B05&PID_1A52&MI_00'))
+    )
+    $asusChecks=@(for($i=0;$i -lt 4;$i++){
+        $category=@('LAN','Wireless','Bluetooth','Audio')[$i]
+        $package=New-AsusPackage $asusDevices[$i] $board (Get-WindowsDriverTarget '10.0.26300.0') $category ([pscustomobject]@{Version='2.3.4.5';DownloadUrl=[pscustomobject]@{Global='/pub/ASUS/mb/fixture_RZ616.zip'};sha256=''}) ('https://www.asus.com/supportonly/'+[Uri]::EscapeDataString($board.Model)+'/helpdesk_download/')
+        [pscustomobject]@{Key=$asusDevices[$i].Key;Current=$asusDevices[$i].Current;Available=$package.Version;Checked=$true;Status='Newer at source';Url=$package.SourceUrl;Package=$package}
+    })
+    $asusSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($board)+$asusDevices;Checks=$asusChecks;Offers=@();ExcludedOffers=@();Warnings=@()}
+    $asusView=Invoke-StartupCase 'managed-asus' $asusSnapshot $false
+    Assert-Startup 4 @($asusView.MainItems|Where-Object Action -eq 'Download & install').Count 'all four ASUS driver categories expose managed download actions'
 
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'

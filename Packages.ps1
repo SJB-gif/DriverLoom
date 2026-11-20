@@ -2,6 +2,7 @@
 function Test-ManagedPackageUri([uri]$uri,[string]$family) {
     if(!$uri.IsAbsoluteUri -or $uri.Scheme -cne 'https' -or $uri.Port -ne 443 -or $uri.UserInfo -or $uri.Fragment -or $uri.Query){return $false}
     switch($family){
+        'ASUSDriver' {return $uri.DnsSafeHost -cin @('dlcdnets.asus.com','dlcdnet.asus.com') -and $uri.AbsolutePath -cmatch '^/pub/ASUS/mb/[A-Za-z0-9_./-]+\.zip$'}
         'AMDChipset' {return $uri.DnsSafeHost -ceq 'drivers.amd.com' -and $uri.AbsolutePath -cmatch '^/drivers/amd_chipset_software_\d+(?:\.\d+){3}\.exe$'}
         'AMDRadeon' {return $uri.DnsSafeHost -ceq 'drivers.amd.com' -and $uri.AbsolutePath -cmatch '^/drivers/whql-amd-software-adrenalin-edition-\d{2}\.\d{1,2}\.\d{1,2}-win(?:10|11)-[a-z]\.exe$'}
         'NvidiaDesktop' {return $uri.DnsSafeHost -cin @('us.download.nvidia.com','download.nvidia.com') -and $uri.AbsolutePath -cmatch '^/Windows/\d{3}\.\d{2}/\d{3}\.\d{2}-desktop-win10-win11-64bit-international-dch-whql\.exe$'}
@@ -10,7 +11,8 @@ function Test-ManagedPackageUri([uri]$uri,[string]$family) {
 }
 
 function Assert-ManagedPackage($package) {
-    if($package.Family -notin 'AMDChipset','AMDRadeon','NvidiaDesktop' -or $package.OSFamily -notin '10','11' -or !$package.DeviceKey -or !$package.DeviceModel -or !$package.Current){throw 'The manufacturer package has no supported device and Windows match.'}
+    if($package.Family -notin 'AMDChipset','AMDRadeon','NvidiaDesktop','ASUSDriver' -or $package.OSFamily -notin '10','11' -or !$package.DeviceKey -or !$package.DeviceModel -or !$package.Current){throw 'The manufacturer package has no supported device and Windows match.'}
+    if($package.Family -eq 'ASUSDriver'){Assert-AsusPackage $package;return}
     $source=Get-HttpsUri $package.SourceUrl;$uri=Get-HttpsUri $package.Url
     if(!(Test-ManagedPackageUri $uri $package.Family)){throw 'The package has no approved official download URL.'}
     $version=[string]$package.Version
@@ -84,6 +86,7 @@ function Test-ManagedPackageOffer($device,$check) {
         Assert-ManagedPackage $check.Package
         if($check.Package.DeviceKey -cne $device.Key -or $check.Package.Current -cne $device.Current -or $check.Package.Version -cne $check.Available -or $check.Package.SourceUrl -cne $check.Url){return $false}
         return ($check.Package.Family -eq 'AMDChipset' -and $device.Kind -eq 'Chipset package' -and (Get-HardwareVendor $device) -eq 'AMD') -or
+            ($check.Package.Family -eq 'ASUSDriver' -and $device.Kind -in 'Network driver','Bluetooth driver','Audio/video driver' -and (@(Get-AsusHardwareIds $device) -join '|') -ceq (@($check.Package.HardwareIds) -join '|')) -or
             ($check.Package.Family -eq 'AMDRadeon' -and $device.Kind -eq 'GPU software' -and (Get-HardwareVendor $device) -eq 'AMD' -and (!$device.Part -or $device.Part -ceq $check.Package.GpuModel)) -or
             ($check.Package.Family -eq 'NvidiaDesktop' -and $device.Kind -eq 'GPU driver' -and (Get-HardwareVendor $device) -eq 'NVIDIA' -and $device.Model -notmatch 'Laptop|Notebook')
     }catch{return $false}
@@ -98,6 +101,7 @@ function Resolve-ManagedPackage($selection) {
     $check=Get-AutomaticManufacturerCheck $matches[0] $data.Inventory $target @{}
     if(!(Test-ManagedPackageOffer $matches[0] $check) -or $check.Available -cne $selection.Check.Available -or $check.Url -cne $selection.Check.Url){throw 'The official update offer changed or cannot be verified. Refresh the hardware list and review it again.'}
     if($check.Package.Family -eq 'AMDRadeon' -and ($check.Package.GpuKey -cne $selection.Check.Package.GpuKey -or $check.Package.GpuCurrent -cne $selection.Check.Package.GpuCurrent)){throw 'The Radeon GPU or its installed display driver changed. Refresh the hardware list before downloading.'}
+    if($check.Package.Family -eq 'ASUSDriver' -and ($check.Package.BoardKey -cne $selection.Check.Package.BoardKey -or $check.Package.OSFamily -cne $selection.Check.Package.OSFamily -or (@($check.Package.HardwareIds) -join '|') -cne (@($selection.Check.Package.HardwareIds) -join '|'))){throw 'The ASUS board, Windows target or device hardware IDs changed. Refresh the list before downloading.'}
     return $check.Package
 }
 
@@ -124,6 +128,7 @@ function Assert-PackageSignature([string]$path,$package) {
 
 function Assert-VerifiedPackage($result) {
     Assert-ManagedPackage $result.Package
+    if($result.Package.Family -eq 'ASUSDriver'){Assert-AsusResult $result;return}
     if($result.SHA256 -cnotmatch '^[a-f0-9]{64}$' -or $result.Bytes -le 0 -or $result.Bytes -gt 2147483648 -or !$result.Path -or !(Test-Path -LiteralPath $result.Path -PathType Leaf) -or (Get-Item -LiteralPath $result.Path).Length -ne $result.Bytes){throw 'The verified download is missing or changed.'}
     if((Get-FileHash -LiteralPath $result.Path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $result.SHA256){throw 'The installer changed after verification. Download it again.'}
     Assert-PackageSignature $result.Path $result.Package
@@ -133,6 +138,7 @@ function Assert-VerifiedPackage($result) {
 function Receive-ManagedPackage($selection,[string]$folder) {
     Write-Progress -Activity 'Downloading installer' -Status 'Checking the current device and official package' -PercentComplete 0
     $package=Resolve-ManagedPackage $selection
+    if($package.Family -eq 'ASUSDriver'){return Receive-AsusPackage $selection $folder $package}
     $name=switch($package.Family){'AMDChipset'{'AMD-Chipset-Setup.exe'}'AMDRadeon'{'AMD-Radeon-Setup.exe'}default{'NVIDIA-Driver-Setup.exe'}}
     $path=Save-VerifiedDownload $package.Url $folder $name 2147483648 0 $package.SourceUrl {param($uri)(Test-ManagedPackageUri $uri $package.Family) -and $uri.AbsolutePath -ceq ([uri]$package.Url).AbsolutePath} {param($path)Assert-PackageSignature $path $package} -UseRanges:($package.Family -eq 'AMDRadeon')
     try{
@@ -149,5 +155,5 @@ function Receive-ManagedPackage($selection,[string]$folder) {
 function Start-ManagedPackage($result) {
     Assert-VerifiedPackage $result
     # No silent switches, pre-accepted licences, forced restarts or driver-rank overrides.
-    Start-Process -FilePath $result.Path -PassThru
+    Start-Process -FilePath $result.Path -WorkingDirectory ([IO.Path]::GetDirectoryName($result.Path)) -PassThru
 }

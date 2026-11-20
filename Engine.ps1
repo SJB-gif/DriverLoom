@@ -1,8 +1,9 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.18'
+$script:LauncherVersion = '0.1.19'
 . (Join-Path $PSScriptRoot 'Coverage.ps1')
 . (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 . (Join-Path $PSScriptRoot 'Packages.ps1')
+. (Join-Path $PSScriptRoot 'AsusPackages.ps1')
 
 function Save-Json($path, $data) {
     $temp = "$path.$([guid]::NewGuid().ToString('N')).tmp"

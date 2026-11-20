@@ -18,14 +18,15 @@ function Show-Message([string]$message){$script:failure=$message}
 function Start-AppInstaller([string]$path,$info,[string]$version){$script:starts++;Assert-DownloadUI 'DriverLoom-Setup.exe' ([IO.Path]::GetFileName($path)) 'only the completed worker result is dispatched'}
 function Start-ManagedPackage($result){
     $script:vendorStarts++;Assert-DownloadUI $script:expectedVendorFile ([IO.Path]::GetFileName($result.Path)) 'manufacturer worker result is dispatched'
+    if($result.Package.Family -eq 'ASUSDriver'){$script:lastAsusRoot=$result.Root}
     $process=[pscustomobject]@{HasExited=$true};$process|Add-Member ScriptMethod Dispose {};return $process
 }
 function Start-Scan {$script:rescans++}
 function Start-Job {
     param($ArgumentList,$ScriptBlock)
     # Replace only the network worker: real job/progress/cancellation and UI event handlers remain in use.
-    Microsoft.PowerShell.Core\Start-Job -ArgumentList $script:case,$script:appDownload.CancelPath,$ArgumentList[3],$ArgumentList[4],$script:expectedVendorFile -ScriptBlock {
-        param($mode,$cancel,$folder,$manufacturer,$vendorFile)
+    Microsoft.PowerShell.Core\Start-Job -ArgumentList $script:case,$script:appDownload.CancelPath,$ArgumentList[3],$ArgumentList[4],$script:expectedVendorFile,$ArgumentList[1].Check.Package.Family -ScriptBlock {
+        param($mode,$cancel,$folder,$manufacturer,$vendorFile,$family)
         Write-Progress -Activity 'Fixture download' -Status 'Fixture progress' -PercentComplete 50
         if($mode -in 'cancel','window-close'){
             $watch=[Diagnostics.Stopwatch]::StartNew()
@@ -34,7 +35,11 @@ function Start-Job {
         }
         Start-Sleep -Milliseconds 700
         if($mode -eq 'failure'){throw 'Fixture checksum mismatch.'}
-        if($manufacturer){[pscustomobject]@{Path=(Join-Path $folder $vendorFile)}}else{Join-Path $folder 'DriverLoom-Setup.exe'}
+        if($family -eq 'ASUSDriver'){
+            $root=Join-Path ([IO.Path]::GetTempPath()) ('DriverLoom-ASUS-'+[guid]::NewGuid().ToString('N'));[void][IO.Directory]::CreateDirectory($root)
+            $path=Join-Path $root 'AsusSetup.exe';[IO.File]::WriteAllText($path,'fixture; never executed')
+            [pscustomobject]@{Path=$path;Root=$root;Package=[pscustomobject]@{Family='ASUSDriver'}}
+        }elseif($manufacturer){[pscustomobject]@{Path=(Join-Path $folder $vendorFile)}}else{Join-Path $folder 'DriverLoom-Setup.exe'}
     }
 }
 $root=Join-Path ([IO.Path]::GetTempPath()) ('driverloom-download-ui-'+[guid]::NewGuid().ToString('N'))
@@ -73,13 +78,19 @@ try{
     $selection=[pscustomobject]@{Device=$device;Check=[pscustomobject]@{Checked=$true;Status='Newer at source';Available=$package.Version;Url=$package.SourceUrl;Package=$package}}
     $script:vendorStarts=0;$script:rescans=0
     $script:expectedVendorFile='AMD-Chipset-Setup.exe';$script:expectedVendorDevice='AMD Chipset Software'
-    foreach($family in 'AMDChipset','AMDRadeon'){
+    foreach($family in 'AMDChipset','AMDRadeon','ASUSDriver'){
         if($family -eq 'AMDRadeon'){
             $gpu=New-HardwareRow 'GPU driver' 'AMD' 'AMD Radeon(TM) Graphics' '' '' '32.0.21030.2001' @()
             $device=New-HardwareRow 'GPU software' 'AMD' 'AMD Software: Adrenalin Edition' '' '' '24.6.1' @()
             $package=New-ManagedPackage 'AMDRadeon' $device (Get-WindowsDriverTarget '10.0.26300.0') '26.11.2' 'https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen/ryzen-7000-series/amd-ryzen-9-7900x3d.html' 'https://drivers.amd.com/drivers/whql-amd-software-adrenalin-edition-26.11.2-win11-a.exe' $gpu
             $selection=[pscustomobject]@{Device=$device;Check=[pscustomobject]@{Checked=$true;Status='Newer at source';Available=$package.Version;Url=$package.SourceUrl;Package=$package}}
             $script:expectedVendorFile='AMD-Radeon-Setup.exe';$script:expectedVendorDevice=$device.Model
+        }elseif($family -eq 'ASUSDriver'){
+            $device=New-HardwareRow 'Bluetooth driver' 'MediaTek' 'MediaTek Bluetooth Adapter' '' '' '1.0.0.0' @('USB\VID_0489&PID_E0E2&MI_00')
+            $board=New-HardwareRow 'Motherboard' 'ASUSTeK' 'ROG STRIX X670E-A GAMING WIFI' '' '' '' @()
+            $package=New-AsusPackage $device $board (Get-WindowsDriverTarget '10.0.26300.0') 'Bluetooth' ([pscustomobject]@{Version='1.1037.0.399';DownloadUrl=[pscustomobject]@{Global='/pub/ASUS/mb/02BT/fixture_RZ616.zip'};sha256=''}) ('https://www.asus.com/supportonly/'+[Uri]::EscapeDataString($board.Model)+'/helpdesk_download/')
+            $selection=[pscustomobject]@{Device=$device;Check=[pscustomobject]@{Checked=$true;Status='Newer at source';Available=$package.Version;Url=$package.SourceUrl;Package=$package}}
+            $script:expectedVendorFile='AsusSetup.exe';$script:expectedVendorDevice=$device.Model
         }
     foreach($mode in 'success','cancel','window-close','failure'){
         $script:case=$mode;$script:sawProgress=$false;$script:sawBusy=$false;$script:failure='';$script:sawVendorSession=$false;$script:sawInstallLock=$false;$before=$script:vendorStarts
@@ -92,6 +103,7 @@ try{
             Assert-DownloadUI $true $script:sawInstallLock 'app replacement is blocked during vendor installation'
             Assert-DownloadUI $true $script:vendorDeviceShown 'handoff identifies the device being updated'
             Assert-DownloadUI $true ($script:rescans -gt 0) 'manufacturer setup leads to a fresh hardware check'
+            if($family -eq 'ASUSDriver'){Assert-DownloadUI $true (Test-Path -LiteralPath $script:lastAsusRoot) 'ASUS setup payload stays available to vendor child processes';Remove-AsusRoot $script:lastAsusRoot}
         }else{Assert-DownloadUI $before $script:vendorStarts 'cancel/failure never starts vendor setup'}
     }
     }

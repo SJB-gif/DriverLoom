@@ -181,8 +181,8 @@ function Get-AmdCheck($row, $inventory, $target, $cache) {
 }
 
 function Get-AsusCheck($row, $inventory, $target, $cache) {
-    $board = $inventory | Where-Object { $_.Kind -eq 'Motherboard' -and $_.Manufacturer -match 'ASUS|ASUSTeK' } | Select-Object -First 1
-    if (!$board) { return $null }
+    $boards = @($inventory | Where-Object { $_.Kind -eq 'Motherboard' -and $_.Manufacturer -match 'ASUS|ASUSTeK' })
+    if ($boards.Count -ne 1) { return $null };$board=$boards[0]
     $category = ''; $pattern = ''; $packageModel = ''
     if ($row.Kind -eq 'Network driver') {
         $intel = [regex]::Match($row.Model, '\b(I225|I226)-[A-Z0-9]+\b', 'IgnoreCase')
@@ -207,7 +207,10 @@ function Get-AsusCheck($row, $inventory, $target, $cache) {
     # Select a numeric driver version, not a package date or a driver for another board variant.
     $latest = $files | Sort-Object { [version]$_.Version } -Descending | Select-Object -First 1
     if (!$latest) { throw 'No unambiguous component driver version was published for this board and Windows version.' }
-    New-ManufacturerCheck $row $url $latest.Version (Compare-ReportedVersion $row.Current $latest.Version) "ASUS exact-board $category feed for Windows $($target.Family) x64: $([Net.WebUtility]::HtmlDecode(($latest.Title -replace '<[^>]+>',' '))). Released $($latest.ReleaseDate). Board packages are for manual vendor review; check the board revision before installation."
+    $check=New-ManufacturerCheck $row $url $latest.Version (Compare-ReportedVersion $row.Current $latest.Version) "ASUS exact-board $category feed for Windows $($target.Family) x64: $([Net.WebUtility]::HtmlDecode(($latest.Title -replace '<[^>]+>',' '))). Released $($latest.ReleaseDate)."
+    $sameVersion=@($files|Where-Object Version -eq $latest.Version|ForEach-Object{$_.DownloadUrl.Global}|Select-Object -Unique)
+    if($sameVersion.Count -eq 1){$package=New-AsusPackage $row $board $target $category $latest $url;if($package){$check|Add-Member NoteProperty Package $package}}
+    return $check
 }
 
 function Get-AutomaticManufacturerCheck($row, $inventory, $target, $cache) {

@@ -53,9 +53,9 @@ function Get-VerifiedDownloadRange($response,[long]$start,[long]$end,[long]$leng
 }
 
 function Save-VerifiedDownload([string]$url,[string]$folder,[string]$filename,[long]$maxBytes,[long]$expectedBytes,[string]$referrer,[scriptblock]$allowedUri,[scriptblock]$verify,[switch]$UseRanges,[int]$RangeBytes=1048576) {
-    if($filename -notmatch '^[a-zA-Z0-9._-]+\.exe$' -or $maxBytes -le 0 -or $expectedBytes -lt 0 -or $expectedBytes -gt $maxBytes -or $RangeBytes -lt 1 -or $RangeBytes -gt 8388608){throw 'Invalid download bounds.'}
+    if($filename -notmatch '^[a-zA-Z0-9._-]+\.(?:exe|zip)$' -or $maxBytes -le 0 -or $expectedBytes -lt 0 -or $expectedBytes -gt $maxBytes -or $RangeBytes -lt 1 -or $RangeBytes -gt 8388608){throw 'Invalid download bounds.'}
     # The UI creates a new unique folder for each attempt; never overwrite another download.
-    $part=Join-Path $folder ($filename -replace '\.exe$','.part');$target=Join-Path $folder $filename;$cancel=Join-Path $folder 'cancel'
+    $part=Join-Path $folder ($filename -replace '\.(?:exe|zip)$','.part');$target=Join-Path $folder $filename;$cancel=Join-Path $folder 'cancel'
     if(!(Test-Path -LiteralPath $folder -PathType Container) -or (Test-Path -LiteralPath $part) -or (Test-Path -LiteralPath $target)){throw 'The download folder is not ready.'}
     $response=$null;$stream=$null;$output=$null;$success=$false;$uri=[uri]$url
     $watch=[Diagnostics.Stopwatch]::StartNew()

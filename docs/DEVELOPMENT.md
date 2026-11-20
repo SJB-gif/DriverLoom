@@ -53,6 +53,8 @@ Managed app updates accept only newer stable releases from `SJB-gif/DriverLoom`,
 
 `Test-DownloadRanges.ps1` checks complete byte assembly, strong validators, range boundaries, changed lengths, ignored ranges, truncation and cancellation with small synthetic streams. Transfer progress is throttled to keep large downloads from flooding the job's progress stream.
 
+`AsusPackages.ps1` handles the bounded ASUS archive workflow; `AsusTrust.cs` uses read-only Windows SetupAPI and WinVerifyTrust/catalog APIs. `Test-AsusTrust.ps1` verifies a standard Windows catalog member, rejects changed bytes and checks x64 INF parsing. `Test-AsusPackages.ps1` uses synthetic archives and mocked signers/launches to test all four categories, IDs/classes/versions, unsafe ZIP paths/links, cancellation, changed offers and configuration tampering. Actual ASUS archives can be inspected separately without executing setup; vendor archives and binaries are never committed to the repository.
+
 Review and redact hardware identifiers before attaching inventory or logs to a public issue. Include the DriverLoom version, Windows version, failing action and the relevant error.
 
 ## Optional source catalog

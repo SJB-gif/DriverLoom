@@ -6,7 +6,7 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
-**Latest source/test version: 0.1.18.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
+**Latest source/test version: 0.1.19.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
 
 ## Code signing policy
 
@@ -33,6 +33,7 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 - Hardware categories such as Graphics, Storage and Audio & media, with individual device versions and actions.
 - Download, verify and open DriverLoom's own update installer without using a browser.
 - Managed downloads for matched AMD chipset, Radeon Adrenalin WHQL Recommended and desktop NVIDIA WHQL packages.
+- Verified ASUS board-specific LAN, Wi-Fi, Bluetooth and audio downloads, with automatic unpacking and ASUS setup handoff.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
 
@@ -54,13 +55,15 @@ Devices stay in their hardware category even when they share an app. Each keeps 
 
 ## Manufacturer downloads
 
-For a verified newer **AMD chipset**, **Radeon Adrenalin WHQL Recommended** or **desktop NVIDIA WHQL** package, the action becomes **Download & install**, including when a vendor app is installed. DriverLoom refreshes the device and official offer, downloads from the matching official source with progress and Cancel, validates Windows' trusted manufacturer signature, and opens the vendor installer automatically. You do not need to visit the download page or find the downloaded file.
+For a verified newer **AMD chipset**, **Radeon Adrenalin WHQL Recommended**, **desktop NVIDIA WHQL** or supported **ASUS board-specific driver** package, the action becomes **Download & install**, including when a vendor app is installed. DriverLoom refreshes the device and official offer, downloads from the matching official source with progress and Cancel, validates the package, and opens the vendor installer automatically. You do not need to visit the download page or find the downloaded file.
 
 Radeon downloads appear on the **AMD Software: Adrenalin Edition** row, where installed and available package versions can be compared. The exact Radeon GPU and its Windows product page determine the package, including for supported discrete Radeon cards on Intel systems and desktop Ryzen integrated graphics. The individual GPU driver row keeps its own display-driver version and details. Optional/beta packages, ambiguous GPU matches and Windows versions older than Windows 10 21H2 are excluded from managed Radeon downloads.
 
+ASUS downloads initially cover matched **Intel I225/I226 LAN**, **MediaTek/RZ616 Wi-Fi and Bluetooth**, and **Realtek USB audio** on supported ASUS motherboards. The exact board and Windows feed supplies the ZIP. DriverLoom checks a published ASUS checksum when available, extracts it with file and size bounds, verifies the ASUS setup signature, and requires an x64 INF with the exact device ID and driver version verified against its trusted Windows catalog. Every extracted file is hashed and checked again before setup starts. Some older ASUS feeds do not publish ZIP checksums; those downloads rely on the official HTTPS source plus the driver/catalog and setup checks. A matching title or version alone is insufficient. Unsupported layouts are rejected; the official website remains available.
+
 Complete or cancel the vendor setup, then choose **Check again** in DriverLoom. Versions are read again; opening an installer is never reported as a successful driver update. Windows security prompts, licence review, installation options and restart instructions remain with the vendor installer. Downloads and installations start only from your explicit action, one package at a time.
 
-NVIDIA notebook packages, unsupported Radeon variants, OEM ZIP/INF bundles, BIOS and storage/peripheral firmware retain their app or official website action. No serial-number portal, account, forced restart or silent driver-install switch is used. If source matching, download bounds or publisher validation fails, the package is not run. Official links remain available from the device's context menu.
+NVIDIA notebook packages, unsupported Radeon/ASUS variants, other OEM bundles, BIOS and storage/peripheral firmware retain their app or official website action. No serial-number portal, account, forced restart or silent driver-install switch is sent by DriverLoom. ASUS setup controls its own bundled installation steps. If source matching, download bounds or signature validation fails, the package is not run. Official links remain available from the device's context menu.
 
 ## Checks and background operation
 
@@ -92,6 +95,7 @@ DriverLoom requires no account and contains no analytics, advertising or usage t
 - **App update checks:** the startup check contacts the public DriverLoom GitHub release API without an account, hardware details or diagnostic files. You can disable it in Settings. Manual app checks contact the same API.
 - **App downloads:** choosing Download and install retrieves only DriverLoom's own installer from its public GitHub release and GitHub's release storage. Verified installers are saved under the local data folder's `downloads` directory. No account or diagnostic upload is involved. Verification checks integrity; the installer remains unsigned while signing is on hold.
 - **Manufacturer downloads:** choosing a device's Download & install action contacts its official metadata and download servers. The device and offer are checked again locally before and after download. Verified installers are stored in the same local `downloads` directory. A local SHA-256 detects changes before launch; it is not presented as a checksum published by the manufacturer. No hardware inventory or diagnostic file is uploaded. The vendor installer applies its own privacy policy.
+- **ASUS extraction:** archives remain in the local downloads folder. Verified setup files are extracted into a uniquely named `DriverLoom-ASUS-...` folder in Windows Temp and remain available for the vendor's child processes. Windows temporary-file cleanup can remove them later. Failed or cancelled preparation removes its extracted files. Catalog verification is read-only and does not register catalogs or install drivers.
 - **Optional catalogs and links:** catalog metadata is fetched if you configure a repository. Opening a vendor, release notes or repository link visits that site in your browser. Manufacturer logos are bundled locally and make no network requests.
 - **Installed applications:** launcher discovery reads local installation and executable metadata; app paths are not uploaded. Open actions start the verified vendor application with its normal permissions and settings. Those applications apply their own privacy policies.
 

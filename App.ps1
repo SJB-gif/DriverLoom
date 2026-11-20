@@ -145,7 +145,11 @@ function Receive-AppDownload {
     }
     catch{if(!$state.Cancelled){$state.Failure=$_.Exception.Message}}
     finally{Remove-Job -Job $job -Force}
-    if($state.Cancelled -and $state.Path){[IO.File]::Delete($state.Path);$state.Path=''}
+    if($state.Cancelled -and $state.Path){
+        if($state.Result.Package.Family -eq 'ASUSDriver'){Remove-AsusRoot $state.Result.Root;if([IO.File]::Exists($state.Result.ArchivePath)){[IO.File]::Delete($state.Result.ArchivePath)}}
+        else{[IO.File]::Delete($state.Path)}
+        $state.Path=''
+    }
     $state.Closing=$true;$state.Dialog.Close()
 }
 
@@ -203,6 +207,7 @@ function Invoke-DownloadDialog($info,[switch]$Manufacturer) {
 
 function Install-ManufacturerUpdate($selection) {
     if($SmokeTest -or $script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess){return}
+    $result=$null
     try{
         $setupLock=$null
         if([Threading.Mutex]::TryOpenExisting('Local\DriverLoom.Setup',[ref]$setupLock)){$setupLock.Dispose();throw 'Finish DriverLoom setup before starting a manufacturer update.'}
