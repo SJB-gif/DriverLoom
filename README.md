@@ -44,7 +44,7 @@ Settings save when you click back onto the main window or press **Esc**. BIOS an
 
 ## Installed vendor apps
 
-When a supported app is detected, its action becomes **Open iCUE**, **Open NVIDIA App**, **Open AMD Install Manager** or the corresponding app name. DriverLoom reads local installation registrations and standard program locations, verifies the executable's vendor signature and checks it again before opening. Custom local installation folders can be discovered through their registrations. Apps open only when you select an Open action; no update command or silent installation is sent.
+When a supported app is detected, its action becomes **Open iCUE**, **Open NVIDIA App**, **Open AMD Install Manager** or the corresponding app name. DriverLoom reads local installation registrations and standard program locations on opening and during hardware checks, verifies the executable's vendor signature and checks it again before opening. Custom local installation folders can be discovered through their registrations. Apps open only when you select an Open action; no update command or silent installation is sent.
 
 Supported launchers are AMD Install Manager, AMD Software as a graphics-only fallback, NVIDIA App, CORSAIR iCUE, CORSAIR SSD Toolbox and Samsung Magician. Other devices retain their official website actions.
 

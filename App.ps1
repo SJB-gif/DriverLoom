@@ -630,6 +630,7 @@ function Show-BiosGuide {
 
 function Start-Scan {
     if ($script:job -or $script:installer) { return }
+    if(!$SmokeTest){$script:vendorApps=Get-InstalledVendorApps}
     $script:lastScanAttempt=[DateTimeOffset]::UtcNow.ToString('o')
     $script:fresh = $false
     $script:lastScanError = ''
