@@ -88,7 +88,12 @@ function Get-NvidiaCheck($row, $target, $cache) {
     $installed = Convert-NvidiaInstalledVersion $row.Current
     $status = if ($installed) { Compare-ReportedVersion $installed $latest.Version } else { 'Vendor version found; installed NVIDIA version needs review' }
     $channel=[Uri]::UnescapeDataString([string]$latest.Name)
-    New-ManufacturerCheck $row $details.AbsoluteUri $latest.Version $status "NVIDIA WHQL $channel; exact product $model; Windows $($target.Family) x64. Installed Windows driver $($row.Current) corresponds to NVIDIA $installed. Vendor packages are reviewed and installed from the official source."
+    $check=New-ManufacturerCheck $row $details.AbsoluteUri $latest.Version $status "NVIDIA WHQL $channel; exact product $model; Windows $($target.Family) x64. Installed Windows driver $($row.Current) corresponds to NVIDIA $installed."
+    if($model -notmatch 'Laptop|Notebook' -and $latest.IsEmailRequired -ne '1'){
+        $package=New-ManagedPackage 'NvidiaDesktop' $row $target $latest.Version $details.AbsoluteUri ([string]$latest.DownloadURL)
+        if($package){$check|Add-Member NoteProperty Package $package}
+    }
+    return $check
 }
 
 function Get-AmdChipsetSource($inventory) {
@@ -149,8 +154,12 @@ function Get-AmdCheck($row, $inventory, $target, $cache) {
     if ($row.Kind -eq 'Chipset package') {
         $url = Get-AmdChipsetSource $inventory
         if (!$url) { return $null }
-        $available = Get-AmdPackageVersion (Get-VendorPage $url $cache) $target 'AMD Chipset Drivers'
-        return New-ManufacturerCheck $row $url $available (Compare-ReportedVersion $row.Current $available) "AMD's chipset page matches the detected motherboard chipset and Windows $($target.Family) x64. This compares the installed AMD Chipset Software package, not SMBus/PCI component version numbers. Review the official release notes before installing."
+        $html=Get-VendorPage $url $cache
+        $available = Get-AmdPackageVersion $html $target 'AMD Chipset Drivers'
+        $check=New-ManufacturerCheck $row $url $available (Compare-ReportedVersion $row.Current $available) "AMD's chipset page matches the detected motherboard chipset and Windows $($target.Family) x64. This compares the installed AMD Chipset Software package, not SMBus/PCI component version numbers."
+        $package=Get-AmdChipsetPackage $row $target $available $url $html
+        if($package){$check|Add-Member NoteProperty Package $package}
+        return $check
     }
     if ($row.Kind -in 'GPU software', 'GPU driver' -and (Get-HardwareVendor $row) -eq 'AMD') {
         $gpu = if ($row.Kind -eq 'GPU driver') { $row } else {

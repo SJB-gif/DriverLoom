@@ -59,9 +59,12 @@ function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [strin
     Assert-Startup ([bool]$lifecycle.StartWithWindows) $result.StartWithWindows "$name Windows startup preference"
     Assert-Startup $(if($lifecycle.ContainsKey('CheckAppUpdates')){$lifecycle.CheckAppUpdates}else{$true}) $result.CheckAppUpdates "$name app update preference"
     Assert-Startup $false $result.AppUpdateCheckStarted "$name smoke mode never contacts GitHub"
-    Assert-Startup $(if($lifecycle.ContainsKey('GroupBy')){$lifecycle.GroupBy}else{'Application'}) $result.GroupBy "$name grouping preference"
+    Assert-Startup 'Hardware type' $result.GroupBy "$name always groups by hardware type, including legacy preferences"
+    Assert-Startup 0 $result.GroupingSelectorCount "$name has no application grouping selector"
     Assert-Startup 13 $result.ManufacturerLogoCount "$name bundled manufacturer artwork loads"
     Assert-Startup $true $result.SetupExitDeferredWhileBusy "$name setup cannot interrupt driver installation"
+    Assert-Startup $true $result.SetupExitDeferredDuringPackage "$name setup cannot interrupt manufacturer installation"
+    Assert-Startup $true $result.SetupExitDeferredDuringPackageDownload "$name setup cannot interrupt manufacturer download"
     Assert-Startup $true $result.SetupExitClosesWindow "$name setup request exits even when tray mode is enabled"
     Assert-Startup ([bool]$lifecycle.KeepRunningInTray) $result.TrayVisible "$name notification area icon follows preference"
     Assert-Startup ([bool]$lifecycle.KeepRunningInTray) $result.CloseHidesToTray "$name close hides only when enabled"
@@ -147,7 +150,7 @@ try {
         [pscustomobject]@{Key=$ambiguous.Key;Current=$ambiguous.Current;Available='A13';Status='Different version; verify vendor ordering';Checked=$true;Detail='Version ordering is not established.';Url='https://example.com/firmware'}
     )}
     $list=Invoke-StartupCase 'list-statuses' $listSnapshot $false
-    Assert-Startup 'Alpha installed newer|Ambiguous firmware|Failed network check|Zeta current GPU' ($list.MainDevices -join '|') 'main list opens in Device A-Z order'
+    Assert-Startup 'Alpha installed newer|Zeta current GPU|Failed network check|Ambiguous firmware' ($list.MainDevices -join '|') 'main list opens by hardware category, then Device A-Z'
     foreach($name in $equal.Model,$higher.Model){
         $item=$list.MainItems|Where-Object Device -eq $name
         Assert-Startup 'UP TO DATE' $item.Status "$name remains visible and green"
@@ -162,21 +165,25 @@ try {
     $groupSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($headset,$input,$snapshot.Inventory[3]);Offers=@();Checks=@();ExcludedOffers=@();Warnings=@()}
     $apps=@{icue=[pscustomobject]@{Key='icue';Name='iCUE';Vendor='Corsair';Path='C:\Fixtures\iCUE.exe'}}
     $grouped=Invoke-StartupCase 'launcher-groups' $groupSnapshot $false '' $true -VendorApps $apps
-    Assert-Startup 2 $grouped.HardwareRows 'two iCUE devices use one compact row while the SSD stays separate'
-    Assert-Startup 1 @($grouped.LauncherGroups).Count 'one shared launcher group'
-    Assert-Startup 2 @($grouped.LauncherGroups[0].Members).Count 'every grouped device remains inspectable'
-    Assert-Startup $true (@($grouped.LauncherGroups[0].Versions) -contains '2.4.2.0') 'individual installed versions survive grouping'
-    Assert-Startup $true ($grouped.LauncherGroups[0].Height -lt 140) 'group uses less height than two normal rows'
-    Assert-Startup 'iCUE' $grouped.LauncherGroups[0].Status 'unverified firmware is not marked up to date'
-    Assert-Startup $true (@($grouped.MainItems.Action) -contains 'Open iCUE') 'group action opens its installed app'
+    Assert-Startup 3 $grouped.HardwareRows 'shared launchers retain separate devices under hardware categories'
+    Assert-Startup 0 @($grouped.LauncherGroups).Count 'application groups are removed'
+    Assert-Startup $true (@($grouped.MainItems.Status) -contains 'CORSAIR iCUE') 'unverified firmware names its app'
+    Assert-Startup 2 @($grouped.MainItems|Where-Object Action -eq 'Open iCUE').Count 'each iCUE device retains its action'
     $categories=Invoke-StartupCase 'hardware-categories' $groupSnapshot $false '' $true @{GroupBy='Hardware type'} -VendorApps $apps
     Assert-Startup 0 @($categories.LauncherGroups).Count 'hardware view does not merge devices sharing a launcher'
     Assert-Startup 'Audio & media|Peripherals|Storage' ($categories.HardwareCategories -join '|') 'hardware categories have clear names and default alphabetical order'
-    Assert-Startup 6 $categories.HardwareRows 'all three devices and their category headers are present'
+    Assert-Startup 3 $categories.HardwareRows 'all three devices are present beneath category headers'
     Assert-Startup 2 @($categories.MainItems|Where-Object Action -eq 'Open iCUE').Count 'each device retains its own correct launcher action'
     Assert-Startup 3 @($categories.MainItems|Where-Object Action).Count 'category headers expose no action'
     $checkedCategories=Invoke-StartupCase 'hardware-categories-checked' $listSnapshot $false '' $false @{GroupBy='Hardware type'}
     Assert-Startup 4 @($checkedCategories.MainItems|Where-Object Action).Count 'category view retains current, unavailable and ambiguous devices'
+    $managedDevice=New-HardwareRow 'Chipset package' 'AMD' 'AMD Chipset Software' '' '' '7.01.08.129' @()
+    $managedPackage=New-ManagedPackage 'AMDChipset' $managedDevice ([pscustomobject]@{Family='11'}) '8.09.28.1124' 'https://www.amd.com/en/support/downloads/drivers.html/chipsets/am5/x670e.html' 'https://drivers.amd.com/drivers/amd_chipset_software_8.09.28.1124.exe'
+    $managedSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($managedDevice);Offers=@();ExcludedOffers=@();Warnings=@();Checks=@([pscustomobject]@{Key=$managedDevice.Key;Current=$managedDevice.Current;Available=$managedPackage.Version;Checked=$true;Status='Newer at source';Url=$managedPackage.SourceUrl;Package=$managedPackage})}
+    $managedApps=@{amdManager=[pscustomobject]@{Key='amdManager';Name='AMD Install Manager';Vendor='AMD';Path='C:\Fixtures\AMDInstallManager.exe'}}
+    $managed=Invoke-StartupCase 'managed-package' $managedSnapshot $false '' $false @{GroupBy='Application'} -VendorApps $managedApps
+    Assert-Startup 'Download & install' $managed.MainItems[0].Action 'verified newer package takes priority over its installed vendor app'
+    Assert-Startup 'System & chipset' $managed.HardwareCategories[0] 'legacy application grouping preference is ignored'
 
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'

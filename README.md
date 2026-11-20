@@ -6,7 +6,7 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
-**Latest source/test version: 0.1.16.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
+**Latest source/test version: 0.1.17.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
 
 ## Code signing policy
 
@@ -17,7 +17,7 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 1. Download and run **DriverLoom-Setup.exe**. Setup closes running DriverLoom windows and tray copies before upgrading. Finish any active driver installation first. Your settings are kept.
 2. Choose whether to add **Start menu** and **Desktop** shortcuts.
 3. Open **DriverLoom**. By default, it checks on opening. Use the refresh arrow to check again.
-4. When updates are found, **Update All** opens a review list. Eligible Windows Update drivers can be installed together after confirmation. **Review update** opens the official manufacturer page for packages requiring manual installation.
+4. When updates are found, **Update All** opens a review list. Eligible Windows Update drivers can be installed together after confirmation. **Download & install** retrieves a supported manufacturer package and opens its verified installer. Other devices use the indicated app or official website.
 
 ## Features
 
@@ -30,15 +30,15 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 - Bundled manufacturer logos, with hardware category icons as fallbacks.
 - Startup and manual checks for published DriverLoom updates.
 - Open supported, verified installed vendor apps directly from device actions.
-- Compact groups for devices sharing the same installed launcher, with individual statuses and versions.
-- Switch between application groups and hardware categories such as Graphics, Storage and Audio & media.
+- Hardware categories such as Graphics, Storage and Audio & media, with individual device versions and actions.
 - Download, verify and open DriverLoom's own update installer without using a browser.
+- Managed downloads for matched AMD chipset and desktop NVIDIA WHQL packages.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
 
 Devices remain visible after a successful check. Green **Up to date** means the installed version matches or exceeds the checked source; **Vendor details** keeps the official link available. **Update available** identifies a newer version. Failed or ambiguous comparisons show **Check unavailable**, with the reason in device details.
 
-The list opens in **Device A–Z** order. Click Device to switch A–Z/Z–A, or Status for **updates first**, then up-to-date devices, then application names A–Z. Unavailable checks follow those groups. Installed, Available and Action do not change the sorting. Your selected order stays in place as results refresh.
+The list is grouped by **hardware type**. Click Device for A–Z/Z–A within categories, or Status for **updates first**, then up-to-date devices, then application names A–Z. Status sorting puts categories containing updates first and keeps each heading with its devices. Unavailable checks follow other statuses. Installed, Available and Action do not change the sorting. Your selected order stays in place as results refresh.
 
 Enable **Show items without automatic checks** in Settings to include devices managed by other software or a manual support page. Their status names where to go: for example, **CORSAIR iCUE**, **CORSAIR SSD Toolbox** or **Microsoft Gaming Services**. Use **Open update page** for the official website. These labels do not mean an update is available. Unknown software owners are not assigned guessed download links.
 
@@ -50,9 +50,15 @@ When a supported app is detected, its action becomes **Open iCUE**, **Open NVIDI
 
 Supported launchers are AMD Install Manager, AMD Software as a graphics-only fallback, NVIDIA App, CORSAIR iCUE, CORSAIR SSD Toolbox and Samsung Magician. Other devices retain their official website actions.
 
-Two or more visible devices using the same detected launcher share a compact header and one Open button. Each device keeps its own installed/available version and status. iCUE peripherals and SSD Toolbox drives stay separate. Double-click a group for individual device details, official websites and source editing. Right-click any device or group for details and official links. Status sorting moves a group together and puts groups with available updates first. App-managed firmware is not labelled up to date without a verified comparison.
+Devices stay in their hardware category even when they share an app. Each keeps its own installed/available version, status and action. Double-click a device for details; right-click for its official website. App-managed firmware is not labelled up to date without a verified comparison.
 
-Use **By application** or **By hardware type** above the list. Application grouping is the default; your choice is saved. Hardware categories keep a separate action for each device, so items requiring different software remain distinct. Device sorting orders categories and their members by name. Status sorting puts categories containing updates first, then sorts the devices within each category with updates first. The unsupported-items checkbox applies to both views.
+## Manufacturer downloads
+
+For a verified newer **AMD chipset** or **desktop NVIDIA WHQL** package, the action becomes **Download & install**, including when a vendor app is installed. DriverLoom refreshes the device and official offer, downloads from the matching official source with progress and Cancel, validates Windows' trusted manufacturer signature, and opens the vendor installer automatically. You do not need to visit the download page or find the downloaded file.
+
+Complete or cancel the vendor setup, then choose **Check again** in DriverLoom. Versions are read again; opening an installer is never reported as a successful driver update. Windows security prompts, licence review, installation options and restart instructions remain with the vendor installer. Downloads and installations start only from your explicit action, one package at a time.
+
+The first supported set excludes NVIDIA notebook packages, Radeon packages, OEM ZIP/INF bundles, BIOS and storage/peripheral firmware. Those devices retain their app or official website action. No serial-number portal, account, forced restart or silent driver-install switch is used. If source matching, download bounds or publisher validation fails, the package is not run. Official links remain available from the device's context menu.
 
 ## Checks and background operation
 
@@ -72,7 +78,7 @@ Only published stable releases are offered. Test installers from Actions can be 
 
 ## Current limits
 
-Automatic installation supports eligible **Windows Update drivers only**. Manufacturer packages require manual installation. Coverage varies by device; see the [coverage guide](docs/COVERAGE.md). DriverLoom does not flash firmware or restart your PC automatically.
+Automatic driver installation supports eligible **Windows Update drivers only**. Supported manufacturer downloads open their normal interactive installer; other packages use the indicated app or website. Coverage varies by device; see the [coverage guide](docs/COVERAGE.md). DriverLoom does not flash firmware or restart your PC automatically.
 
 ## Privacy
 
@@ -83,6 +89,7 @@ DriverLoom requires no account and contains no analytics, advertising or usage t
 - **Update checks:** checks contact Windows Update and manufacturer sites at the frequency you select, or when you use refresh. Some manufacturer lookups include hardware-model and Windows-version details.
 - **App update checks:** the startup check contacts the public DriverLoom GitHub release API without an account, hardware details or diagnostic files. You can disable it in Settings. Manual app checks contact the same API.
 - **App downloads:** choosing Download and install retrieves only DriverLoom's own installer from its public GitHub release and GitHub's release storage. Verified installers are saved under the local data folder's `downloads` directory. No account or diagnostic upload is involved. Verification checks integrity; the installer remains unsigned while signing is on hold.
+- **Manufacturer downloads:** choosing a device's Download & install action contacts its official metadata and download servers. The device and offer are checked again locally before and after download. Verified installers are stored in the same local `downloads` directory. A local SHA-256 detects changes before launch; it is not presented as a checksum published by the manufacturer. No hardware inventory or diagnostic file is uploaded. The vendor installer applies its own privacy policy.
 - **Optional catalogs and links:** catalog metadata is fetched if you configure a repository. Opening a vendor, release notes or repository link visits that site in your browser. Manufacturer logos are bundled locally and make no network requests.
 - **Installed applications:** launcher discovery reads local installation and executable metadata; app paths are not uploaded. Open actions start the verified vendor application with its normal permissions and settings. Those applications apply their own privacy policies.
 

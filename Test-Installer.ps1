@@ -164,7 +164,7 @@ try {
     Assert-Installer $false (Test-Path -LiteralPath $legacyShortcutPath) 'legacy shortcut replaced during upgrade'
     Assert-Installer $script:LauncherVersion $registration.DisplayVersion 'installed version'
     Assert-Installer $installRoot $registration.InstallLocation 'installation path with spaces'
-    foreach ($name in 'App.ps1', 'Engine.ps1', 'Lifecycle.ps1', 'AppUpdates.ps1', 'AppDownloads.ps1', 'VendorApps.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom-loops.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
+    foreach ($name in 'App.ps1', 'Engine.ps1', 'Lifecycle.ps1', 'AppUpdates.ps1', 'AppDownloads.ps1', 'Packages.ps1', 'VendorApps.ps1', 'Manufacturers.ps1', 'Coverage.ps1', 'Install.ps1', 'Launch.ps1', 'Theme.ps1', 'Theme.cs', 'assets\DriverLoom-loops.ico', 'assets\DriverLoom.png', 'assets\DriverLoom-brand.png', 'assets\GitHub-light.png', 'assets\GitHub-dark.png', 'LICENSE') {
         Assert-Installer (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash (Get-FileHash -LiteralPath (Join-Path $installRoot $name)).Hash "$name payload matches source"
     }
     foreach($file in (Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'assets\manufacturers') -File)){

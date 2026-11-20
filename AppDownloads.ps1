@@ -13,11 +13,12 @@ function Test-AppDownloadUri([uri]$uri) {
     return $uri.IsAbsoluteUri -and $uri.Scheme -ceq 'https' -and $uri.Port -eq 443 -and !$uri.UserInfo -and !$uri.Fragment -and $uri.DnsSafeHost -cin @('github.com','release-assets.githubusercontent.com','objects.githubusercontent.com')
 }
 
-function Open-AppDownloadResponse([uri]$uri) {
+function Open-AppDownloadResponse([uri]$uri,[string]$referrer='') {
     $request=[Net.HttpWebRequest]::Create($uri)
     $request.AllowAutoRedirect=$false;$request.Timeout=15000;$request.ReadWriteTimeout=10000
     $request.UserAgent='DriverLoom app updater';$request.UseDefaultCredentials=$false
     $request.AutomaticDecompression=[Net.DecompressionMethods]::None
+    if($referrer){$request.Referer=$referrer}
     return $request.GetResponse()
 }
 
@@ -39,16 +40,21 @@ function Assert-AppInstaller([string]$path,$info,[string]$currentVersion) {
 
 function Receive-AppInstaller($info,[string]$currentVersion,[string]$folder) {
     Assert-AppDownloadInfo $info $currentVersion
+    return Save-VerifiedDownload $info.InstallerUrl $folder 'DriverLoom-Setup.exe' 67108864 $info.InstallerSize $info.ReleaseUrl {param($uri)Test-AppDownloadUri $uri} {param($path)Assert-AppInstaller $path $info $currentVersion}
+}
+
+function Save-VerifiedDownload([string]$url,[string]$folder,[string]$filename,[long]$maxBytes,[long]$expectedBytes,[string]$referrer,[scriptblock]$allowedUri,[scriptblock]$verify) {
+    if($filename -notmatch '^[a-zA-Z0-9._-]+\.exe$' -or $maxBytes -le 0 -or $expectedBytes -lt 0 -or $expectedBytes -gt $maxBytes){throw 'Invalid download bounds.'}
     # The UI creates a new unique folder for each attempt; never overwrite another download.
-    $part=Join-Path $folder 'DriverLoom-Setup.part';$target=Join-Path $folder 'DriverLoom-Setup.exe';$cancel=Join-Path $folder 'cancel'
+    $part=Join-Path $folder ($filename -replace '\.exe$','.part');$target=Join-Path $folder $filename;$cancel=Join-Path $folder 'cancel'
     if(!(Test-Path -LiteralPath $folder -PathType Container) -or (Test-Path -LiteralPath $part) -or (Test-Path -LiteralPath $target)){throw 'The download folder is not ready.'}
-    $response=$null;$stream=$null;$output=$null;$success=$false;$uri=[uri]$info.InstallerUrl
+    $response=$null;$stream=$null;$output=$null;$success=$false;$uri=[uri]$url
     $watch=[Diagnostics.Stopwatch]::StartNew()
     try{
         for($redirect=0;$redirect -le 5;$redirect++){
             if(Test-Path -LiteralPath $cancel){throw [OperationCanceledException]::new('Download cancelled.')}
-            if(!(Test-AppDownloadUri $uri)){throw 'The download redirected outside GitHub release storage.'}
-            $response=Open-AppDownloadResponse $uri
+            if(!(& $allowedUri $uri)){throw 'The download redirected outside its approved official source.'}
+            $response=Open-AppDownloadResponse $uri $referrer
             $code=[int]$response.StatusCode
             if($code -in 301,302,303,307,308){
                 $location=[string]$response.Headers['Location'];$response.Dispose();$response=$null
@@ -58,26 +64,29 @@ function Receive-AppInstaller($info,[string]$currentVersion,[string]$folder) {
             if($code -ne 200){throw 'The installer server did not return a download.'}
             break
         }
-        if($response.ContentLength -ne -1 -and $response.ContentLength -ne [long]$info.InstallerSize){throw 'The installer server reported an unexpected file size.'}
+        if($response.ContentLength -gt $maxBytes -or ($expectedBytes -gt 0 -and $response.ContentLength -ne -1 -and $response.ContentLength -ne $expectedBytes)){throw 'The installer server reported an unexpected file size.'}
+        $length=if($expectedBytes -gt 0){$expectedBytes}else{$response.ContentLength}
         $stream=$response.GetResponseStream();$output=[IO.File]::Open($part,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
         $buffer=[byte[]]::new(65536);$total=0L
         while($true){
             if(Test-Path -LiteralPath $cancel){throw [OperationCanceledException]::new('Download cancelled.')}
-            if($watch.Elapsed.TotalMinutes -ge 10){throw 'The installer download timed out. Please try again.'}
+            if($watch.Elapsed.TotalMinutes -ge 30){throw 'The installer download timed out. Please try again.'}
             $count=$stream.Read($buffer,0,$buffer.Length)
             if($count -eq 0){break}
             $total+=$count
-            if($total -gt [long]$info.InstallerSize){throw 'The download exceeded the expected installer size.'}
+            if($total -gt $maxBytes -or ($length -gt 0 -and $total -gt $length)){throw 'The download exceeded the expected installer size.'}
             $output.Write($buffer,0,$count)
-            Write-Progress -Activity 'Downloading DriverLoom' -Status ('{0:N1} of {1:N1} MB' -f ($total/1MB),($info.InstallerSize/1MB)) -PercentComplete ([int](100*$total/$info.InstallerSize))
+            $description=if($length -gt 0){'{0:N1} of {1:N1} MB' -f ($total/1MB),($length/1MB)}else{'{0:N1} MB downloaded' -f ($total/1MB)}
+            Write-Progress -Activity 'Downloading installer' -Status $description -PercentComplete $(if($length -gt 0){[int](100*$total/$length)}else{0})
         }
         $output.Dispose();$output=$null;$stream.Dispose();$stream=$null;$response.Dispose();$response=$null
-        Write-Progress -Activity 'Downloading DriverLoom' -Status 'Verifying installer' -PercentComplete 100
-        Assert-AppInstaller $part $info $currentVersion
+        if($total -le 0 -or ($length -gt 0 -and $total -ne $length)){throw 'The installer download is incomplete.'}
+        Write-Progress -Activity 'Downloading installer' -Status 'Verifying installer' -PercentComplete 100
+        & $verify $part
         if(Test-Path -LiteralPath $cancel){throw [OperationCanceledException]::new('Download cancelled.')}
         [IO.File]::Move($part,$target)
         # Preserve Internet origin so normal Windows attachment/reputation checks still apply.
-        $zone="[ZoneTransfer]`r`nZoneId=3`r`nReferrerUrl=$($info.ReleaseUrl)`r`nHostUrl=$($info.InstallerUrl)`r`n"
+        $zone="[ZoneTransfer]`r`nZoneId=3`r`nReferrerUrl=$referrer`r`nHostUrl=$url`r`n"
         Set-Content -LiteralPath $target -Stream Zone.Identifier -Value $zone -Encoding ASCII -NoNewline
         if((Get-Content -LiteralPath $target -Stream Zone.Identifier -Raw) -cne $zone){throw 'Windows could not mark the installer as an Internet download.'}
         $success=$true
@@ -85,7 +94,7 @@ function Receive-AppInstaller($info,[string]$currentVersion,[string]$folder) {
     }finally{
         if($output){$output.Dispose()};if($stream){$stream.Dispose()};if($response){$response.Dispose()}
         if(!$success){foreach($file in @($part,$target)){if([IO.File]::Exists($file)){[IO.File]::Delete($file)}}}
-        Write-Progress -Activity 'Downloading DriverLoom' -Completed
+        Write-Progress -Activity 'Downloading installer' -Completed
     }
 }
 

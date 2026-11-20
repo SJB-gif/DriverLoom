@@ -47,7 +47,9 @@ Local state remains in `%LOCALAPPDATA%\HardwareUpdateLauncher` for compatibility
 - `startup-error.log` or `host-error.log`: startup diagnostics, when a failure occurs.
 - `downloads`: verified DriverLoom update installers; cancelled or failed attempts remove their installer and partial file.
 
-Managed app updates accept only newer stable releases from `SJB-gif/DriverLoom`, require the completed asset's GitHub SHA-256 digest, limit the installer to 64 MiB, constrain HTTPS redirects to GitHub release hosts, and check its embedded version before launch. The Internet-zone marker is retained and setup is interactive. `Test-AppDownloads.ps1` exercises downloads with synthetic response streams and a mocked launcher; it never executes downloaded files. Manufacturer downloads and direct installation are separate, unimplemented work.
+Managed app updates accept only newer stable releases from `SJB-gif/DriverLoom`, require the completed asset's GitHub SHA-256 digest, limit the installer to 64 MiB, constrain HTTPS redirects to GitHub release hosts, and check its embedded version before launch. The Internet-zone marker is retained and setup is interactive. `Test-AppDownloads.ps1` exercises downloads with synthetic response streams and a mocked launcher; it never executes downloaded files.
+
+`Packages.ps1` implements the bounded AMD chipset / desktop NVIDIA routes described in [coverage](COVERAGE.md). `Test-Packages.ps1` uses synthetic official feeds, streams and signatures to cover fresh device/offer resolution, exact hosts/paths/publishers, withdrawn packages, cancellation and file tampering. `Test-AppDownloadUI.ps1` covers both app and manufacturer workers, cancellation, handoff guards and rechecking, with process launches mocked. No driver package is executed by these tests.
 
 Review and redact hardware identifiers before attaching inventory or logs to a public issue. Include the DriverLoom version, Windows version, failing action and the relevant error.
 
