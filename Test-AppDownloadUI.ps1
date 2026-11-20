@@ -17,15 +17,15 @@ function Update-Controls {if($script:appDownload -or $script:packageInstaller){$
 function Show-Message([string]$message){$script:failure=$message}
 function Start-AppInstaller([string]$path,$info,[string]$version){$script:starts++;Assert-DownloadUI 'DriverLoom-Setup.exe' ([IO.Path]::GetFileName($path)) 'only the completed worker result is dispatched'}
 function Start-ManagedPackage($result){
-    $script:vendorStarts++;Assert-DownloadUI 'AMD-Chipset-Setup.exe' ([IO.Path]::GetFileName($result.Path)) 'manufacturer worker result is dispatched'
+    $script:vendorStarts++;Assert-DownloadUI $script:expectedVendorFile ([IO.Path]::GetFileName($result.Path)) 'manufacturer worker result is dispatched'
     $process=[pscustomobject]@{HasExited=$true};$process|Add-Member ScriptMethod Dispose {};return $process
 }
 function Start-Scan {$script:rescans++}
 function Start-Job {
     param($ArgumentList,$ScriptBlock)
     # Replace only the network worker: real job/progress/cancellation and UI event handlers remain in use.
-    Microsoft.PowerShell.Core\Start-Job -ArgumentList $script:case,$script:appDownload.CancelPath,$ArgumentList[3],$ArgumentList[4] -ScriptBlock {
-        param($mode,$cancel,$folder,$manufacturer)
+    Microsoft.PowerShell.Core\Start-Job -ArgumentList $script:case,$script:appDownload.CancelPath,$ArgumentList[3],$ArgumentList[4],$script:expectedVendorFile -ScriptBlock {
+        param($mode,$cancel,$folder,$manufacturer,$vendorFile)
         Write-Progress -Activity 'Fixture download' -Status 'Fixture progress' -PercentComplete 50
         if($mode -in 'cancel','window-close'){
             $watch=[Diagnostics.Stopwatch]::StartNew()
@@ -34,7 +34,7 @@ function Start-Job {
         }
         Start-Sleep -Milliseconds 700
         if($mode -eq 'failure'){throw 'Fixture checksum mismatch.'}
-        if($manufacturer){[pscustomobject]@{Path=(Join-Path $folder 'AMD-Chipset-Setup.exe')}}else{Join-Path $folder 'DriverLoom-Setup.exe'}
+        if($manufacturer){[pscustomobject]@{Path=(Join-Path $folder $vendorFile)}}else{Join-Path $folder 'DriverLoom-Setup.exe'}
     }
 }
 $root=Join-Path ([IO.Path]::GetTempPath()) ('driverloom-download-ui-'+[guid]::NewGuid().ToString('N'))
@@ -44,7 +44,7 @@ $info=[pscustomobject]@{Tag='v0.2.0';LatestVersion='0.2.0';ReleaseUrl='https://g
 $timer.Add_Tick({
     if($script:packageInstaller){
         $script:sawVendorSession=$true;$script:sawInstallLock=$null -ne $script:driverInstallLock
-        foreach($window in $form.OwnedForms){if($window.Text -eq 'Driver setup opened'){$script:vendorDeviceShown=@($window.Controls|Where-Object Text -eq 'AMD Chipset Software').Count -eq 1;($window.Controls|Where-Object Text -eq 'Check again').PerformClick()}}
+        foreach($window in $form.OwnedForms){if($window.Text -eq 'Driver setup opened'){$script:vendorDeviceShown=@($window.Controls|Where-Object Text -eq $script:expectedVendorDevice).Count -eq 1;($window.Controls|Where-Object Text -eq 'Check again').PerformClick()}}
     }
     if($script:appDownload -and $script:appDownload.Progress.Value -eq 50){
         $script:sawProgress=$true
@@ -72,6 +72,15 @@ try{
     $package=New-ManagedPackage 'AMDChipset' $device ([pscustomobject]@{Family='11'}) '8.09.28.1124' 'https://www.amd.com/en/support/downloads/drivers.html/chipsets/am5/x670e.html' 'https://drivers.amd.com/drivers/amd_chipset_software_8.09.28.1124.exe'
     $selection=[pscustomobject]@{Device=$device;Check=[pscustomobject]@{Checked=$true;Status='Newer at source';Available=$package.Version;Url=$package.SourceUrl;Package=$package}}
     $script:vendorStarts=0;$script:rescans=0
+    $script:expectedVendorFile='AMD-Chipset-Setup.exe';$script:expectedVendorDevice='AMD Chipset Software'
+    foreach($family in 'AMDChipset','AMDRadeon'){
+        if($family -eq 'AMDRadeon'){
+            $gpu=New-HardwareRow 'GPU driver' 'AMD' 'AMD Radeon(TM) Graphics' '' '' '32.0.21030.2001' @()
+            $device=New-HardwareRow 'GPU software' 'AMD' 'AMD Software: Adrenalin Edition' '' '' '24.6.1' @()
+            $package=New-ManagedPackage 'AMDRadeon' $device (Get-WindowsDriverTarget '10.0.26300.0') '26.11.2' 'https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen/ryzen-7000-series/amd-ryzen-9-7900x3d.html' 'https://drivers.amd.com/drivers/whql-amd-software-adrenalin-edition-26.11.2-win11-a.exe' $gpu
+            $selection=[pscustomobject]@{Device=$device;Check=[pscustomobject]@{Checked=$true;Status='Newer at source';Available=$package.Version;Url=$package.SourceUrl;Package=$package}}
+            $script:expectedVendorFile='AMD-Radeon-Setup.exe';$script:expectedVendorDevice=$device.Model
+        }
     foreach($mode in 'success','cancel','window-close','failure'){
         $script:case=$mode;$script:sawProgress=$false;$script:sawBusy=$false;$script:failure='';$script:sawVendorSession=$false;$script:sawInstallLock=$false;$before=$script:vendorStarts
         Install-ManufacturerUpdate $selection
@@ -84,6 +93,7 @@ try{
             Assert-DownloadUI $true $script:vendorDeviceShown 'handoff identifies the device being updated'
             Assert-DownloadUI $true ($script:rescans -gt 0) 'manufacturer setup leads to a fresh hardware check'
         }else{Assert-DownloadUI $before $script:vendorStarts 'cancel/failure never starts vendor setup'}
+    }
     }
     Write-Output 'App and manufacturer update UI checks passed: asynchronous progress, cancellation, error recovery, verified setup dispatch, installation guard and recheck. No installer was executed.'
 }finally{

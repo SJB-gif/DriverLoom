@@ -6,7 +6,7 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
-**Latest source/test version: 0.1.17.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
+**Latest source/test version: 0.1.18.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
 
 ## Code signing policy
 
@@ -32,7 +32,7 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 - Open supported, verified installed vendor apps directly from device actions.
 - Hardware categories such as Graphics, Storage and Audio & media, with individual device versions and actions.
 - Download, verify and open DriverLoom's own update installer without using a browser.
-- Managed downloads for matched AMD chipset and desktop NVIDIA WHQL packages.
+- Managed downloads for matched AMD chipset, Radeon Adrenalin WHQL Recommended and desktop NVIDIA WHQL packages.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
 
@@ -54,11 +54,13 @@ Devices stay in their hardware category even when they share an app. Each keeps 
 
 ## Manufacturer downloads
 
-For a verified newer **AMD chipset** or **desktop NVIDIA WHQL** package, the action becomes **Download & install**, including when a vendor app is installed. DriverLoom refreshes the device and official offer, downloads from the matching official source with progress and Cancel, validates Windows' trusted manufacturer signature, and opens the vendor installer automatically. You do not need to visit the download page or find the downloaded file.
+For a verified newer **AMD chipset**, **Radeon Adrenalin WHQL Recommended** or **desktop NVIDIA WHQL** package, the action becomes **Download & install**, including when a vendor app is installed. DriverLoom refreshes the device and official offer, downloads from the matching official source with progress and Cancel, validates Windows' trusted manufacturer signature, and opens the vendor installer automatically. You do not need to visit the download page or find the downloaded file.
+
+Radeon downloads appear on the **AMD Software: Adrenalin Edition** row, where installed and available package versions can be compared. The exact Radeon GPU and its Windows product page determine the package, including for supported discrete Radeon cards on Intel systems and desktop Ryzen integrated graphics. The individual GPU driver row keeps its own display-driver version and details. Optional/beta packages, ambiguous GPU matches and Windows versions older than Windows 10 21H2 are excluded from managed Radeon downloads.
 
 Complete or cancel the vendor setup, then choose **Check again** in DriverLoom. Versions are read again; opening an installer is never reported as a successful driver update. Windows security prompts, licence review, installation options and restart instructions remain with the vendor installer. Downloads and installations start only from your explicit action, one package at a time.
 
-The first supported set excludes NVIDIA notebook packages, Radeon packages, OEM ZIP/INF bundles, BIOS and storage/peripheral firmware. Those devices retain their app or official website action. No serial-number portal, account, forced restart or silent driver-install switch is used. If source matching, download bounds or publisher validation fails, the package is not run. Official links remain available from the device's context menu.
+NVIDIA notebook packages, unsupported Radeon variants, OEM ZIP/INF bundles, BIOS and storage/peripheral firmware retain their app or official website action. No serial-number portal, account, forced restart or silent driver-install switch is used. If source matching, download bounds or publisher validation fails, the package is not run. Official links remain available from the device's context menu.
 
 ## Checks and background operation
 

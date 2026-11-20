@@ -49,7 +49,9 @@ Local state remains in `%LOCALAPPDATA%\HardwareUpdateLauncher` for compatibility
 
 Managed app updates accept only newer stable releases from `SJB-gif/DriverLoom`, require the completed asset's GitHub SHA-256 digest, limit the installer to 64 MiB, constrain HTTPS redirects to GitHub release hosts, and check its embedded version before launch. The Internet-zone marker is retained and setup is interactive. `Test-AppDownloads.ps1` exercises downloads with synthetic response streams and a mocked launcher; it never executes downloaded files.
 
-`Packages.ps1` implements the bounded AMD chipset / desktop NVIDIA routes described in [coverage](COVERAGE.md). `Test-Packages.ps1` uses synthetic official feeds, streams and signatures to cover fresh device/offer resolution, exact hosts/paths/publishers, withdrawn packages, cancellation and file tampering. `Test-AppDownloadUI.ps1` covers both app and manufacturer workers, cancellation, handoff guards and rechecking, with process launches mocked. No driver package is executed by these tests.
+`Packages.ps1` implements the bounded AMD chipset / Radeon / desktop NVIDIA routes described in [coverage](COVERAGE.md). `Test-Packages.ps1` uses synthetic official feeds, streams and signatures to cover fresh device/offer resolution, exact hosts/paths/publishers, withdrawn packages, cancellation and file tampering. Radeon cases include hybrid systems, Intel CPUs, multiple Radeon GPUs, changed display drivers, optional/beta packages and Windows-specific selection. `Test-AppDownloadUI.ps1` covers app, chipset and Radeon workers, cancellation, handoff guards and rechecking, with process launches mocked. No driver package is executed by these tests.
+
+`Test-DownloadRanges.ps1` checks complete byte assembly, strong validators, range boundaries, changed lengths, ignored ranges, truncation and cancellation with small synthetic streams. Transfer progress is throttled to keep large downloads from flooding the job's progress stream.
 
 Review and redact hardware identifiers before attaching inventory or logs to a public issue. Include the DriverLoom version, Windows version, failing action and the relevant error.
 

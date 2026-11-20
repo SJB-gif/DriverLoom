@@ -184,6 +184,18 @@ try {
     $managed=Invoke-StartupCase 'managed-package' $managedSnapshot $false '' $false @{GroupBy='Application'} -VendorApps $managedApps
     Assert-Startup 'Download & install' $managed.MainItems[0].Action 'verified newer package takes priority over its installed vendor app'
     Assert-Startup 'System & chipset' $managed.HardwareCategories[0] 'legacy application grouping preference is ignored'
+    $radeon=New-HardwareRow 'GPU driver' 'AMD' 'AMD Radeon(TM) Graphics' '' '' '32.0.21030.2001' @()
+    $software=New-HardwareRow 'GPU software' 'AMD' 'AMD Software: Adrenalin Edition' '' '' '24.6.1' @()
+    $source='https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen/ryzen-7000-series/amd-ryzen-9-7900x3d.html'
+    $package=New-ManagedPackage 'AMDRadeon' $software (Get-WindowsDriverTarget '10.0.26300.0') '26.11.2' $source 'https://drivers.amd.com/drivers/whql-amd-software-adrenalin-edition-26.11.2-win11-a.exe' $radeon
+    $radeonSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($software,$radeon);Offers=@();ExcludedOffers=@();Warnings=@();Checks=@(
+        [pscustomobject]@{Key=$software.Key;Current=$software.Current;Available=$package.Version;Checked=$true;Status='Newer at source';Url=$source;Package=$package},
+        [pscustomobject]@{Key=$radeon.Key;Current=$radeon.Current;Available=$package.Version;Checked=$true;Status='Vendor package found; compare the AMD Software row';Url=$source}
+    )}
+    $radeonView=Invoke-StartupCase 'managed-radeon' $radeonSnapshot $false '' $false -VendorApps $managedApps
+    Assert-Startup 1 @($radeonView.MainItems|Where-Object Action -eq 'Download & install').Count 'Radeon offers one download on the comparable software row'
+    Assert-Startup 'Download & install' ($radeonView.MainItems|Where-Object Device -eq $software.Model).Action 'Radeon package download takes priority over installed AMD updater'
+    Assert-Startup 'CHECK UNAVAILABLE' ($radeonView.MainItems|Where-Object Device -eq $radeon.Model).Status 'display-driver version is not compared with an Adrenalin package version'
 
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'

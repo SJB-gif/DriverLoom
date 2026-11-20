@@ -12,8 +12,8 @@ function Get-WindowsDriverTarget([string]$osVersion) {
     if (![version]::TryParse($osVersion, [ref]$version) -or $version.Major -ne 10 -or $version.Build -lt 10240) {
         throw 'Automatic manufacturer checks require Windows 10 or 11 x64.'
     }
-    if ($version.Build -ge 22000) { return [pscustomobject]@{ Family = '11'; Nvidia = 135; Asus = 52 } }
-    return [pscustomobject]@{ Family = '10'; Nvidia = 57; Asus = 45 }
+    if ($version.Build -ge 22000) { return [pscustomobject]@{ Family = '11'; Build=$version.Build; Nvidia = 135; Asus = 52 } }
+    return [pscustomobject]@{ Family = '10'; Build=$version.Build; Nvidia = 57; Asus = 45 }
 }
 
 function New-ManufacturerCheck($row, [string]$url, [string]$available, [string]$status, [string]$detail, [bool]$checked = $true) {
@@ -169,9 +169,13 @@ function Get-AmdCheck($row, $inventory, $target, $cache) {
         }
         $url = Get-AmdGraphicsSource $inventory $gpu
         if (!$url) { return $null }
-        $available = Get-AmdPackageVersion (Get-VendorPage $url $cache) $target 'AMD Software: Adrenalin Edition'
+        $html=Get-VendorPage $url $cache
+        $available = Get-AmdPackageVersion $html $target 'AMD Software: Adrenalin Edition'
         $status = if ($row.Kind -eq 'GPU software') { Compare-ReportedVersion $row.Current $available } else { 'Vendor package found; compare the AMD Software row' }
-        return New-ManufacturerCheck $row $url $available $status "AMD Adrenalin package for the detected $($gpu.Model) product and Windows $($target.Family) x64. The package version is compared only with installed AMD Software; it is not a Windows display-driver version."
+        $check=New-ManufacturerCheck $row $url $available $status "AMD Adrenalin package for the detected $($gpu.Model) product and Windows $($target.Family) x64. The package version is compared only with installed AMD Software; it is not a Windows display-driver version."
+        $package=Get-AmdRadeonPackage $row $gpu $target $available $url $html
+        if($package){$check|Add-Member NoteProperty Package $package}
+        return $check
     }
     return $null
 }

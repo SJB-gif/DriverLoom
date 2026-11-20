@@ -22,6 +22,7 @@ if ($LASTEXITCODE -ne 0 -or $compilerVersion -notmatch '^v(\d+\.\d+)' -or [versi
 & (Join-Path $PSScriptRoot 'Test-Lifecycle.ps1')
 & (Join-Path $PSScriptRoot 'Test-AppUpdates.ps1')
 & (Join-Path $PSScriptRoot 'Test-AppDownloads.ps1')
+& (Join-Path $PSScriptRoot 'Test-DownloadRanges.ps1')
 & (Join-Path $PSScriptRoot 'Test-AppDownloadUI.ps1')
 & (Join-Path $PSScriptRoot 'Test-Packages.ps1')
 & (Join-Path $PSScriptRoot 'Test-VendorApps.ps1')

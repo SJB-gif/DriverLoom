@@ -13,12 +13,13 @@ function Test-AppDownloadUri([uri]$uri) {
     return $uri.IsAbsoluteUri -and $uri.Scheme -ceq 'https' -and $uri.Port -eq 443 -and !$uri.UserInfo -and !$uri.Fragment -and $uri.DnsSafeHost -cin @('github.com','release-assets.githubusercontent.com','objects.githubusercontent.com')
 }
 
-function Open-AppDownloadResponse([uri]$uri,[string]$referrer='') {
+function Open-AppDownloadResponse([uri]$uri,[string]$referrer='',[long]$rangeStart=-1,[long]$rangeEnd=-1,[string]$etag='') {
     $request=[Net.HttpWebRequest]::Create($uri)
     $request.AllowAutoRedirect=$false;$request.Timeout=15000;$request.ReadWriteTimeout=10000
     $request.UserAgent='DriverLoom app updater';$request.UseDefaultCredentials=$false
     $request.AutomaticDecompression=[Net.DecompressionMethods]::None
     if($referrer){$request.Referer=$referrer}
+    if($rangeStart -ge 0){$request.AddRange($rangeStart,$rangeEnd);if($etag){$request.Headers['If-Range']=$etag}}
     return $request.GetResponse()
 }
 
@@ -43,8 +44,16 @@ function Receive-AppInstaller($info,[string]$currentVersion,[string]$folder) {
     return Save-VerifiedDownload $info.InstallerUrl $folder 'DriverLoom-Setup.exe' 67108864 $info.InstallerSize $info.ReleaseUrl {param($uri)Test-AppDownloadUri $uri} {param($path)Assert-AppInstaller $path $info $currentVersion}
 }
 
-function Save-VerifiedDownload([string]$url,[string]$folder,[string]$filename,[long]$maxBytes,[long]$expectedBytes,[string]$referrer,[scriptblock]$allowedUri,[scriptblock]$verify) {
-    if($filename -notmatch '^[a-zA-Z0-9._-]+\.exe$' -or $maxBytes -le 0 -or $expectedBytes -lt 0 -or $expectedBytes -gt $maxBytes){throw 'Invalid download bounds.'}
+function Get-VerifiedDownloadRange($response,[long]$start,[long]$end,[long]$length=0,[string]$etag='') {
+    if([int]$response.StatusCode -ne 206 -or [string]$response.Headers['Content-Range'] -cnotmatch '^bytes ([0-9]+)-([0-9]+)/([0-9]+)$'){throw 'The server returned an invalid download segment.'}
+    $actualStart=[long]$Matches[1];$actualEnd=[long]$Matches[2];$actualLength=[long]$Matches[3]
+    $actualTag=[string]$response.Headers['ETag']
+    if($actualLength -le 0 -or $actualStart -ne $start -or $actualEnd -ne [Math]::Min($end,$actualLength-1) -or $actualEnd -lt $actualStart -or ($length -gt 0 -and $actualLength -ne $length) -or $actualTag -cnotmatch '^"[!#-~]{1,200}"$' -or ($etag -and $actualTag -cne $etag) -or ($response.ContentLength -ne -1 -and $response.ContentLength -ne ($actualEnd-$actualStart+1))){throw 'The download changed or returned an unexpected segment.'}
+    [pscustomobject]@{Length=$actualLength;End=$actualEnd;ETag=$actualTag}
+}
+
+function Save-VerifiedDownload([string]$url,[string]$folder,[string]$filename,[long]$maxBytes,[long]$expectedBytes,[string]$referrer,[scriptblock]$allowedUri,[scriptblock]$verify,[switch]$UseRanges,[int]$RangeBytes=1048576) {
+    if($filename -notmatch '^[a-zA-Z0-9._-]+\.exe$' -or $maxBytes -le 0 -or $expectedBytes -lt 0 -or $expectedBytes -gt $maxBytes -or $RangeBytes -lt 1 -or $RangeBytes -gt 8388608){throw 'Invalid download bounds.'}
     # The UI creates a new unique folder for each attempt; never overwrite another download.
     $part=Join-Path $folder ($filename -replace '\.exe$','.part');$target=Join-Path $folder $filename;$cancel=Join-Path $folder 'cancel'
     if(!(Test-Path -LiteralPath $folder -PathType Container) -or (Test-Path -LiteralPath $part) -or (Test-Path -LiteralPath $target)){throw 'The download folder is not ready.'}
@@ -54,30 +63,45 @@ function Save-VerifiedDownload([string]$url,[string]$folder,[string]$filename,[l
         for($redirect=0;$redirect -le 5;$redirect++){
             if(Test-Path -LiteralPath $cancel){throw [OperationCanceledException]::new('Download cancelled.')}
             if(!(& $allowedUri $uri)){throw 'The download redirected outside its approved official source.'}
-            $response=Open-AppDownloadResponse $uri $referrer
+            if($UseRanges){$response=Open-AppDownloadResponse $uri $referrer 0 ($RangeBytes-1)}else{$response=Open-AppDownloadResponse $uri $referrer}
             $code=[int]$response.StatusCode
             if($code -in 301,302,303,307,308){
                 $location=[string]$response.Headers['Location'];$response.Dispose();$response=$null
                 if(!$location -or $redirect -eq 5){throw 'The installer download has too many redirects.'}
                 $uri=[uri]::new($uri,$location);continue
             }
-            if($code -ne 200){throw 'The installer server did not return a download.'}
+            if($code -ne 200 -and !($UseRanges -and $code -eq 206)){throw 'The installer server did not return a download.'}
             break
         }
-        if($response.ContentLength -gt $maxBytes -or ($expectedBytes -gt 0 -and $response.ContentLength -ne -1 -and $response.ContentLength -ne $expectedBytes)){throw 'The installer server reported an unexpected file size.'}
-        $length=if($expectedBytes -gt 0){$expectedBytes}else{$response.ContentLength}
+        $range=$null
+        if([int]$response.StatusCode -eq 206){$range=Get-VerifiedDownloadRange $response 0 ($RangeBytes-1);$length=$range.Length}
+        else{$length=if($expectedBytes -gt 0){$expectedBytes}else{$response.ContentLength}}
+        if($length -gt $maxBytes -or ($expectedBytes -gt 0 -and $length -ne $expectedBytes) -or (!$range -and $expectedBytes -gt 0 -and $response.ContentLength -ne -1 -and $response.ContentLength -ne $expectedBytes)){throw 'The installer server reported an unexpected file size.'}
         $stream=$response.GetResponseStream();$output=[IO.File]::Open($part,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-        $buffer=[byte[]]::new(65536);$total=0L
+        $buffer=[byte[]]::new(65536);$total=0L;$lastProgress=-200L
         while($true){
             if(Test-Path -LiteralPath $cancel){throw [OperationCanceledException]::new('Download cancelled.')}
             if($watch.Elapsed.TotalMinutes -ge 30){throw 'The installer download timed out. Please try again.'}
             $count=$stream.Read($buffer,0,$buffer.Length)
-            if($count -eq 0){break}
+            if($count -eq 0){
+                if(!$range){break}
+                if($total -ne $range.End+1){throw 'The download segment is incomplete.'}
+                if($total -eq $length){break}
+                $stream.Dispose();$stream=$null;$response.Dispose();$response=$null
+                if(Test-Path -LiteralPath $cancel){throw [OperationCanceledException]::new('Download cancelled.')}
+                $end=[Math]::Min($total+$RangeBytes-1,$length-1)
+                $response=Open-AppDownloadResponse $uri $referrer $total $end $range.ETag
+                $range=Get-VerifiedDownloadRange $response $total $end $length $range.ETag
+                $stream=$response.GetResponseStream();continue
+            }
             $total+=$count
-            if($total -gt $maxBytes -or ($length -gt 0 -and $total -gt $length)){throw 'The download exceeded the expected installer size.'}
+            if($total -gt $maxBytes -or ($length -gt 0 -and $total -gt $length) -or ($range -and $total -gt $range.End+1)){throw 'The download exceeded the expected installer size.'}
             $output.Write($buffer,0,$count)
-            $description=if($length -gt 0){'{0:N1} of {1:N1} MB' -f ($total/1MB),($length/1MB)}else{'{0:N1} MB downloaded' -f ($total/1MB)}
-            Write-Progress -Activity 'Downloading installer' -Status $description -PercentComplete $(if($length -gt 0){[int](100*$total/$length)}else{0})
+            if($watch.ElapsedMilliseconds-$lastProgress -ge 200 -or $total -eq $length){
+                $description=if($length -gt 0){'{0:N1} of {1:N1} MB' -f ($total/1MB),($length/1MB)}else{'{0:N1} MB downloaded' -f ($total/1MB)}
+                Write-Progress -Activity 'Downloading installer' -Status $description -PercentComplete $(if($length -gt 0){[int](100*$total/$length)}else{0})
+                $lastProgress=$watch.ElapsedMilliseconds
+            }
         }
         $output.Dispose();$output=$null;$stream.Dispose();$stream=$null;$response.Dispose();$response=$null
         if($total -le 0 -or ($length -gt 0 -and $total -ne $length)){throw 'The installer download is incomplete.'}
