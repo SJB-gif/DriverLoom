@@ -8,7 +8,7 @@ function Assert-Startup($expected, $actual, [string]$description) {
     if ($actual -cne $expected) { throw "$description expected '$expected', got '$actual'." }
 }
 
-function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '', [Nullable[bool]]$showUnsupported = $null, [hashtable]$lifecycle = @{}, [switch]$SettingsProbe) {
+function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [string]$theme = '', [Nullable[bool]]$showUnsupported = $null, [hashtable]$lifecycle = @{}, [switch]$SettingsProbe, [hashtable]$VendorApps=@{}) {
     $env:LOCALAPPDATA = Join-Path $testRoot $name
     $state = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
     [void][IO.Directory]::CreateDirectory($state)
@@ -21,9 +21,12 @@ function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [strin
     $outputPath=Join-Path $testRoot ($name+'-output.json')
     $errorPath=Join-Path $testRoot ($name+'-error.txt')
     $originalProbe=$env:DRIVERLOOM_TEST_SETTINGS
+    $originalApps=$env:DRIVERLOOM_TEST_VENDOR_APPS
+    $env:DRIVERLOOM_TEST_VENDOR_APPS=''
+    if($VendorApps.Count){$env:DRIVERLOOM_TEST_VENDOR_APPS=Join-Path $state 'vendor-apps-fixture.json';Save-Json $env:DRIVERLOOM_TEST_VENDOR_APPS $VendorApps}
     $env:DRIVERLOOM_TEST_SETTINGS=if($SettingsProbe){'1'}else{''}
     try{$process=Start-Process -FilePath $powerShell -WindowStyle Hidden -ArgumentList @('-NoLogo','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $PSScriptRoot 'Launch.ps1')+'"'),'-SmokeTest') -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -PassThru}
-    finally{$env:DRIVERLOOM_TEST_SETTINGS=$originalProbe}
+    finally{$env:DRIVERLOOM_TEST_SETTINGS=$originalProbe;$env:DRIVERLOOM_TEST_VENDOR_APPS=$originalApps}
     try{
         $null=$process.Handle
         if(!$process.WaitForExit(20000)){$process.Kill();throw "$name startup smoke test timed out."}
@@ -153,6 +156,18 @@ try {
     Assert-Startup 'Installed version is higher' ($list.MainItems|Where-Object Device -eq $higher.Model).Comparison 'installed-newer explanation remains in device details'
     foreach($name in $failed.Model,$ambiguous.Model){Assert-Startup 'CHECK UNAVAILABLE' ($list.MainItems|Where-Object Device -eq $name).Status "$name cannot imply a successful comparison"}
     Assert-Startup $false $list.FreshActionVisible 'current, failed and ambiguous checks never create an update action'
+    $headset=New-HardwareRow 'Audio/video driver' 'Corsair' 'CORSAIR Headset' '' '' '2.4.2.0' @()
+    $input=New-HardwareRow 'Input device driver' 'Corsair' 'Corsair virtual input' '' '' '3.0.88.0' @()
+    $groupSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($headset,$input,$snapshot.Inventory[3]);Offers=@();Checks=@();ExcludedOffers=@();Warnings=@()}
+    $apps=@{icue=[pscustomobject]@{Key='icue';Name='iCUE';Vendor='Corsair';Path='C:\Fixtures\iCUE.exe'}}
+    $grouped=Invoke-StartupCase 'launcher-groups' $groupSnapshot $false '' $true -VendorApps $apps
+    Assert-Startup 2 $grouped.HardwareRows 'two iCUE devices use one compact row while the SSD stays separate'
+    Assert-Startup 1 @($grouped.LauncherGroups).Count 'one shared launcher group'
+    Assert-Startup 2 @($grouped.LauncherGroups[0].Members).Count 'every grouped device remains inspectable'
+    Assert-Startup $true (@($grouped.LauncherGroups[0].Versions) -contains '2.4.2.0') 'individual installed versions survive grouping'
+    Assert-Startup $true ($grouped.LauncherGroups[0].Height -lt 140) 'group uses less height than two normal rows'
+    Assert-Startup 'iCUE' $grouped.LauncherGroups[0].Status 'unverified firmware is not marked up to date'
+    Assert-Startup $true (@($grouped.MainItems.Action) -contains 'Open iCUE') 'group action opens its installed app'
 
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'

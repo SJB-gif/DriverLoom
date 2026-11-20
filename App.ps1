@@ -10,6 +10,7 @@ if($SmokeTest){[Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.F
 . (Join-Path $PSScriptRoot 'Theme.ps1')
 . (Join-Path $PSScriptRoot 'Lifecycle.ps1')
 . (Join-Path $PSScriptRoot 'AppUpdates.ps1')
+. (Join-Path $PSScriptRoot 'VendorApps.ps1')
 
 if(!$SmokeTest){
     $setupLock=$null
@@ -76,6 +77,12 @@ $script:lastNotifiedAppTag=''
 $script:showingAppUpdate=$false
 $script:appUpdateButton=$null
 $script:driverInstallLock=$null
+$script:vendorApps=@{}
+if(!$SmokeTest){$script:vendorApps=Get-InstalledVendorApps}
+elseif($env:DRIVERLOOM_TEST_VENDOR_APPS){
+    $fixture=Get-Content -LiteralPath $env:DRIVERLOOM_TEST_VENDOR_APPS -Raw|ConvertFrom-Json
+    foreach($property in $fixture.PSObject.Properties){$script:vendorApps[$property.Name]=$property.Value}
+}
 
 function Receive-SetupExitRequest {
     if(!$exitEvent.WaitOne(0) -or $script:installer){return $false}
@@ -251,6 +258,7 @@ function Refresh-View {
     $orderedInventory = @($script:snapshot.Inventory)
     $hiddenWindows = 0
     $unsupported = [System.Collections.Generic.List[object]]::new()
+    $entries=[System.Collections.Generic.List[object]]::new()
     foreach ($row in $orderedInventory) {
         if (!$row -or ($row.Kind -eq 'BIOS' -and !$script:settings.Bios)) { continue }
         $check = $checks["$($row.Key)|$($row.Current)"]
@@ -271,12 +279,37 @@ function Refresh-View {
         $name = if ($row.Kind -eq 'GPU software' -and $row.Part) { $row.Model + ' - ' + $row.Part } else { $row.Model }
         $action = if ($mode -eq 'Unsupported') {if($check.Url){'Open update page'}else{'View details'}} elseif ($check.Status -eq 'Newer at source') { 'Review update' } else { 'Vendor details' }
         $manager=if($mode -eq 'Unsupported'){$method.Name}else{''}
-        $i = $hardware.Rows.Add(@($name, $row.Current, $check.Available, (Get-DisplayStatus $check.Status $manager), $action))
-        $hardware.Rows[$i].Tag = [pscustomobject]@{ Device=$row; Url=$check.Url; Check=$check }
-        $hardware.Rows[$i].Cells['Device'].Tag=(Get-HardwareVendor $row)+'  /  '+$row.Kind
-        $hardware.Rows[$i].Cells['Device'].ToolTipText=$name
-        $hardware.Rows[$i].Cells['Status'].ToolTipText=$check.Status+"`r`n"+$check.Detail
-        if($manager){$hardware.Rows[$i].Cells['Status'].Tag='UpdateMethod'}
+        $launcher=Get-DeviceLauncher $row $script:vendorApps
+        if($launcher){$action='Open '+$launcher.Name}
+        $entries.Add([pscustomobject]@{Name=$name;Device=$row;Url=$check.Url;Check=$check;Launcher=$launcher;DisplayStatus=Get-DisplayStatus $check.Status $manager;Manager=$manager;Action=$action})
+    }
+    foreach($display in @(Get-LauncherDisplayGroups $entries.ToArray())){
+        $items=@($display.Items);$first=$items[0]
+        if($display.IsGroup){
+            $launcher=$first.Launcher
+            $name=if($launcher.Name.StartsWith($launcher.Vendor,[StringComparison]::OrdinalIgnoreCase)){$launcher.Name}else{$launcher.Vendor+' '+[char]0x00B7+' '+$launcher.Name}
+            $statuses=@($items.DisplayStatus)
+            $state=if($statuses -contains 'UPDATE AVAILABLE'){'UPDATE AVAILABLE'}elseif(@($statuses|Where-Object{$_ -ne 'UP TO DATE'}).Count -eq 0){'UP TO DATE'}elseif($statuses -contains 'CHECK UNAVAILABLE'){'CHECK UNAVAILABLE'}else{$launcher.Name}
+            $rank=if($state -eq 'UPDATE AVAILABLE'){0}elseif($state -eq 'UP TO DATE'){1}elseif($state -eq 'CHECK UNAVAILABLE'){3}else{2}
+            $i=$hardware.Rows.Add(@($name,'','',$state,('Open '+$launcher.Name)))
+            $hardware.Rows[$i].Tag=[pscustomobject]@{IsGroup=$true;Items=$items;Launcher=$launcher;Device=$null;Check=$null;Url=''}
+            $info=[DriverLoom.UI.LauncherGroupInfo]::new();$info.Rank=$rank
+            $info.Devices=[string[]]@($items.Name);$info.Statuses=[string[]]@($items|ForEach-Object{if($_.Manager){'Check in '+$launcher.Name}else{$_.DisplayStatus}})
+            $info.Installed=[string[]]@($items|ForEach-Object{[string]$_.Device.Current});$info.Available=[string[]]@($items|ForEach-Object{[string]$_.Check.Available})
+            $hardware.Rows[$i].HeaderCell.Tag=$info
+            $hardware.Rows[$i].Height=[DriverLoom.UI.LauncherGroupInfo]::HeaderHeight+$items.Count*[DriverLoom.UI.LauncherGroupInfo]::ItemHeight
+            $hardware.Rows[$i].Cells['Device'].Tag=$launcher.Vendor+'  /  '+$launcher.Name
+            $tip=(@($items|ForEach-Object{$_.Name+' | '+$_.DisplayStatus+' | Installed: '+$_.Device.Current}) -join "`r`n")+"`r`nDouble-click for individual device details and official links."
+            foreach($cell in $hardware.Rows[$i].Cells){$cell.ToolTipText=$tip}
+            if($rank -eq 2){$hardware.Rows[$i].Cells['Status'].Tag='UpdateMethod'}
+        }else{
+            $i=$hardware.Rows.Add(@($first.Name,$first.Device.Current,$first.Check.Available,$first.DisplayStatus,$first.Action))
+            $hardware.Rows[$i].Tag=$first
+            $hardware.Rows[$i].Cells['Device'].Tag=(Get-HardwareVendor $first.Device)+'  /  '+$first.Device.Kind
+            $hardware.Rows[$i].Cells['Device'].ToolTipText=$first.Name
+            $hardware.Rows[$i].Cells['Status'].ToolTipText=$first.Check.Status+"`r`n"+$first.Check.Detail
+            if($first.Manager){$hardware.Rows[$i].Cells['Status'].Tag='UpdateMethod'}
+        }
         $hardware.Rows[$i].Cells['Source'].Tag='Link'
     }
     $script:unsupportedRows = $unsupported.ToArray()
@@ -646,13 +679,15 @@ function Show-UpdateReview([switch]$Preview) {
     [void]$grid.Columns.Add($link)
     foreach($check in @($script:snapshot.Checks|Where-Object Status -eq 'Newer at source')){
         $device=$script:snapshot.Inventory|Where-Object Key -eq $check.Key|Select-Object -First 1
-        $i=$grid.Rows.Add(@($device.Model,$check.Available,'Manual vendor installation','Review update'))
-        $grid.Rows[$i].Tag=$check.Url
+        $launcher=Get-DeviceLauncher $device $script:vendorApps
+        $action=if($launcher){'Open '+$launcher.Name}else{'Review update'}
+        $i=$grid.Rows.Add(@($device.Model,$check.Available,'Manual vendor installation',$action))
+        $grid.Rows[$i].Tag=[pscustomobject]@{Device=$device;Launcher=$launcher;Url=$check.Url;Check=$check}
     }
     foreach($offer in @($script:snapshot.Offers|Where-Object{$_})){
         [void]$grid.Rows.Add(@($offer.Title,'','Install through Windows Update','In update queue'))
     }
-    $grid.Add_CellContentClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -eq 3 -and $sender.Rows[$eventArgs.RowIndex].Tag){Open-Link $sender.Rows[$eventArgs.RowIndex].Tag}})
+    $grid.Add_CellContentClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -eq 3 -and $sender.Rows[$eventArgs.RowIndex].Tag){Open-HardwareAction $sender.Rows[$eventArgs.RowIndex].Tag}})
     $hostPanel=[Windows.Forms.Panel]::new();$hostPanel.SetBounds(24,104,932,310);$hostPanel.Controls.Add($grid);$dialog.Controls.Add($hostPanel)
     $install=New-Button 'Install Windows drivers';$install.Primary=$true;$install.SetBounds(710,436,246,36);$install.DialogResult='OK'
     $install.Enabled=Test-CanInstallSnapshot $script:snapshot $script:fresh $false
@@ -664,9 +699,41 @@ function Show-UpdateReview([switch]$Preview) {
     if($result -eq 'OK'){Start-DriverInstallation}
 }
 
+function Open-HardwareAction($selection) {
+    if($selection.Launcher){
+        if($SmokeTest){return}
+        if($script:installer){Show-Message 'Finish the current driver installation before opening another updater.';return}
+        try{Start-VendorApplication $selection.Launcher}catch{$script:vendorApps=Get-InstalledVendorApps;Refresh-View;Show-Message 'The application could not be opened or verified. The list has been refreshed; use its official website action or device details.'}
+    }elseif($selection.Url){Open-Link $selection.Url}elseif($selection.Device){Show-DeviceInfo $selection}
+}
+
+function Show-DeviceInfo($selection) {
+    if($selection.Check){Show-Message ($selection.Device.Model+"`r`n`r`n"+$selection.Check.Status+"`r`n"+$selection.Check.Detail+"`r`n`r`n"+$selection.Url)}
+}
+
+function Show-LauncherGroup($selection,[switch]$Preview) {
+    $dialog=New-Dialog ($selection.Launcher.Name+' devices | DriverLoom') 490
+    $dialog.ClientSize=[Drawing.Size]::new(980,490)
+    Add-DialogHeading $dialog ($selection.Launcher.Vendor+' / '+$selection.Launcher.Name) 'Individual device versions and comparison details. App versions are separate from driver and firmware versions.'
+    $grid=New-Grid ([ordered]@{Device=220;Status=150;Installed=100;Available=100})
+    $grid.RowTemplate.Height=44
+    foreach($column in $grid.Columns){$column.SortMode='NotSortable'}
+    foreach($item in $selection.Items){$i=$grid.Rows.Add(@($item.Name,$item.DisplayStatus,$item.Device.Current,$item.Check.Available));$grid.Rows[$i].Tag=$item;$grid.Rows[$i].Cells['Status'].ToolTipText=$item.Check.Detail}
+    $panel=[Windows.Forms.Panel]::new();$panel.SetBounds(24,104,932,298);$panel.Controls.Add($grid);$dialog.Controls.Add($panel)
+    $open=New-Button ('Open '+$selection.Launcher.Name);$open.SetBounds(24,430,240,34);$open.Tag=$selection;$open.Add_Click({param($sender,$eventArgs)Open-HardwareAction $sender.Tag})
+    $details=New-Button 'Device details';$details.SetBounds(276,430,152,34);$details.Tag=$grid;$details.Add_Click({param($sender,$eventArgs)if($sender.Tag.SelectedRows.Count){Show-DeviceInfo $sender.Tag.SelectedRows[0].Tag}})
+    $website=New-Button 'Official website';$website.SetBounds(440,430,152,34);$website.Tag=$grid;$website.Add_Click({param($sender,$eventArgs)if($sender.Tag.SelectedRows.Count -and $sender.Tag.SelectedRows[0].Tag.Url){Open-Link $sender.Tag.SelectedRows[0].Tag.Url}})
+    $edit=New-Button 'Edit source';$edit.SetBounds(604,430,132,34);$edit.Tag=$grid;$edit.Add_Click({param($sender,$eventArgs)if($sender.Tag.SelectedRows.Count){Edit-Source $sender.Tag.SelectedRows[0].Tag}})
+    $done=New-Button 'Done';$done.SetBounds(846,430,110,34);$done.DialogResult='Cancel';$dialog.CancelButton=$done
+    $dialog.Controls.AddRange(@($open,$details,$website,$edit,$done))
+    if($Preview){$dialog.Add_Shown({param($sender,$eventArgs)Save-FormPreview $sender 'launcher-group';$sender.Close()})}
+    try{[void]$dialog.ShowDialog($form)}finally{$dialog.Dispose()}
+}
+
 function Show-DeviceDetails {
-    $selected=Get-SelectedRow
-    if($selected.Check){Show-Message ($selected.Device.Model+"`r`n`r`n"+$selected.Check.Status+"`r`n"+$selected.Check.Detail+"`r`n`r`n"+$selected.Check.Url)}
+    if(!$hardware.SelectedRows.Count){return}
+    $selected=$hardware.SelectedRows[0].Tag
+    if($selected.IsGroup){Show-LauncherGroup $selected}else{Show-DeviceInfo $selected}
 }
 
 function Show-About {
@@ -750,7 +817,7 @@ $layout.Controls.Add($toolbar,0,0)
 $hardware=New-Grid ([ordered]@{Device=220;Installed=76;Available=76;Status=130;Source=96})
 $hardware.Decorated=$true;$hardware.RowTemplate.Height=70;$hardware.Columns['Status'].DisplayIndex=1
 $hardware.Columns['Installed'].DefaultCellStyle.Font=[Drawing.Font]::new('Consolas',10);$hardware.Columns['Available'].DefaultCellStyle.Font=[Drawing.Font]::new('Consolas',10)
-$hardware.Columns.Remove('Source');$sourceColumn=[Windows.Forms.DataGridViewButtonColumn]::new();$sourceColumn.FlatStyle='Flat';$sourceColumn.Name='Source';$sourceColumn.HeaderText='ACTION';$sourceColumn.FillWeight=96;[void]$hardware.Columns.Add($sourceColumn)
+$hardware.Columns.Remove('Source');$sourceColumn=[DriverLoom.UI.DeviceActionColumn]::new();$sourceColumn.Name='Source';$sourceColumn.HeaderText='ACTION';$sourceColumn.FillWeight=96;[void]$hardware.Columns.Add($sourceColumn)
 $hardware.ConfigureHardwareSorting()
 $hardware.DefaultCellStyle.WrapMode='False';$hardware.AutoSizeRowsMode='None';$layout.Controls.Add($hardware,0,1)
 $footer=[Windows.Forms.TableLayoutPanel]::new();$footer.Dock='Bottom';$footer.Height=36;$footer.ColumnCount=2;$footer.RowCount=1;$footer.Padding=[Windows.Forms.Padding]::new(22,0,15,0)
@@ -764,8 +831,14 @@ $primary.Add_Click({Show-UpdateReview})
 $refresh.Add_Click({Start-Scan})
 $repoButton.Add_Click({Open-Link 'https://github.com/SJB-gif/DriverLoom'})
 $settingsMenu.Add_Click({Edit-Settings;Update-Controls})
-$hardware.Add_CellContentClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -ge 0 -and $sender.Columns[$eventArgs.ColumnIndex].Name -eq 'Source'){$selected=$sender.Rows[$eventArgs.RowIndex].Tag;if($selected.Url){Open-Link $selected.Url}elseif($selected.Device){Show-DeviceDetails}}})
+$hardware.Add_CellContentClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -ge 0 -and $sender.Columns[$eventArgs.ColumnIndex].Name -eq 'Source'){Open-HardwareAction $sender.Rows[$eventArgs.RowIndex].Tag}})
 $hardware.Add_CellDoubleClick({param($sender,$eventArgs)if($eventArgs.RowIndex -ge 0 -and $eventArgs.ColumnIndex -ne $hardware.Columns['Source'].Index){Show-DeviceDetails}})
+$hardware.Add_CellMouseDown({param($sender,$eventArgs)if($eventArgs.Button -eq 'Right' -and $eventArgs.RowIndex -ge 0){$sender.CurrentCell=$sender.Rows[$eventArgs.RowIndex].Cells['Device']}})
+$hardwareContext=[Windows.Forms.ContextMenuStrip]::new();$hardwareContext.Renderer=[DriverLoom.UI.MenuRenderer]::new()
+$deviceDetailsItem=[Windows.Forms.ToolStripMenuItem]::new('Device details');$deviceDetailsItem.Add_Click({Show-DeviceDetails})
+$officialItem=[Windows.Forms.ToolStripMenuItem]::new('Official website');$officialItem.Add_Click({if($hardware.SelectedRows.Count){$selected=$hardware.SelectedRows[0].Tag;if($selected.IsGroup){Show-LauncherGroup $selected}elseif($selected.Url){Open-Link $selected.Url}}})
+$hardwareContext.Add_Opening({param($sender,$eventArgs)$selected=if($hardware.SelectedRows.Count){$hardware.SelectedRows[0].Tag}else{$null};$deviceDetailsItem.Enabled=[bool]($selected.Device -or $selected.IsGroup);$officialItem.Enabled=[bool]($selected.Url -or $selected.IsGroup)})
+[void]$hardwareContext.Items.Add($deviceDetailsItem);[void]$hardwareContext.Items.Add($officialItem);$hardware.ContextMenuStrip=$hardwareContext
 
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 500
@@ -807,6 +880,8 @@ $form.Add_Shown({
             Edit-Settings -Preview
             Show-UnsupportedItems -Preview
             Show-WindowsExclusions -Preview
+            $group=$hardware.Rows|Where-Object{$_.Tag.IsGroup}|Select-Object -First 1
+            if($group){Show-LauncherGroup $group.Tag -Preview}
             Show-AppUpdateNotice ([pscustomobject]@{CurrentVersion=$script:LauncherVersion;LatestVersion='0.2.0';ReleaseUrl='https://github.com/SJB-gif/DriverLoom/releases';InstallerUrl=''}) -Preview
         }
         $script:smokeResult = [pscustomobject]@{
@@ -839,6 +914,7 @@ $form.Add_Shown({
             SetupExitDeferredWhileBusy = $false
             SetupExitClosesWindow = $false
             MainItems = @($hardware.Rows | ForEach-Object { [pscustomobject]@{Device=$_.Cells['Device'].Value;Status=$_.Cells['Status'].Value;Action=$_.Cells['Source'].Value;Url=$_.Tag.Url;Comparison=$_.Tag.Check.Status} })
+            LauncherGroups = @($hardware.Rows|Where-Object{$_.Tag.IsGroup}|ForEach-Object{[pscustomobject]@{Name=$_.Cells['Device'].Value;Status=$_.Cells['Status'].Value;Height=$_.Height;Members=@($_.Tag.Items.Name);Versions=@($_.Tag.Items|ForEach-Object{$_.Device.Current});Launcher=$_.Tag.Launcher.Key}})
             SettingsProbe = $null
             MainButtonCount = 1
             MainActionText = $primary.Text
@@ -935,12 +1011,13 @@ try {
     Update-Controls
     Set-AppTheme $script:settings.Theme $form
     [Windows.Forms.Application]::Run($form)
-    if ($SmokeTest) { $script:smokeResult | ConvertTo-Json -Compress }
+    if ($SmokeTest) { $script:smokeResult | ConvertTo-Json -Compress -Depth 6 }
 } finally {
     $timer.Stop()
     if ($script:job) { Remove-Job -Job $script:job -Force }
     if ($script:appUpdateJob) { Remove-Job -Job $script:appUpdateJob -Force }
     $timer.Dispose()
+    $hardwareContext.Dispose()
     $tray.Visible=$false;$tray.Dispose();$trayMenu.Dispose()
     $restoreEvent.Dispose()
     $exitEvent.Dispose()

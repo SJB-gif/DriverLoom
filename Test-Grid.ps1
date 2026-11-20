@@ -55,5 +55,16 @@ try{
     Assert-Grid 'A second update' $grid.Rows[0].Cells['Device'].Value 'refresh retains chosen status ordering'
     Assert-Grid 'UP TO DATE' (Get-DisplayStatus 'Installed version is higher') 'installed-newer display is simplified without changing comparison state'
     Assert-Grid 'CHECK UNAVAILABLE' (Get-DisplayStatus 'Vendor package found; compare the AMD Software row') 'incomparable package and driver versions are never green'
+    $groupIndex=$grid.Rows.Add(@('Corsair / iCUE','','','iCUE','Open iCUE'))
+    $group=[DriverLoom.UI.LauncherGroupInfo]::new();$group.Rank=0
+    $group.Devices=[string[]]@('Headset','Virtual input');$group.Statuses=[string[]]@('UPDATE AVAILABLE','Check in iCUE');$group.Installed=[string[]]@('1.0','2.0');$group.Available=[string[]]@('1.1','')
+    $groupRow=$grid.Rows[$groupIndex];$groupRow.HeaderCell.Tag=$group;$groupRow.Height=100
+    $grid.ApplyHardwareSort()
+    Assert-Grid $true ($groupRow.Index -lt ($grid.Rows|Where-Object{$_.Cells['Device'].Value -eq 'Echo installed newer'}).Index) 'group priority follows its available update'
+    Assert-Grid 2 $groupRow.HeaderCell.Tag.Devices.Length 'sorting keeps compact children together'
+    $grid.Columns.Remove('Source');$action=[DriverLoom.UI.DeviceActionColumn]::new();$action.Name='Source';[void]$grid.Columns.Add($action)
+    $bounds=$groupRow.Cells['Source'].GetContentBounds($groupRow.Index)
+    Assert-Grid 32 $bounds.Height 'group action exposes a real button hit area'
+    Assert-Grid $true ($bounds.Bottom -le [DriverLoom.UI.LauncherGroupInfo]::HeaderHeight) 'only the group header button is clickable'
     Write-Output 'Hardware list checks passed: device A-Z/Z-A, fixed status groups, application order, disabled headers, refreshed ordering and comparison labels.'
 }finally{$grid.Dispose()}

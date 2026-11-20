@@ -6,7 +6,7 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
-**Latest source/test version: 0.1.14.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
+**Latest source/test version: 0.1.15.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
 
 ## Code signing policy
 
@@ -29,6 +29,8 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 - Dark, light and system themes, plus an optional BIOS/USB preparation guide.
 - Bundled manufacturer logos, with hardware category icons as fallbacks.
 - Startup and manual checks for published DriverLoom updates.
+- Open supported, verified installed vendor apps directly from device actions.
+- Compact groups for devices sharing the same installed launcher, with individual statuses and versions.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
 
@@ -39,6 +41,14 @@ The list opens in **Device A–Z** order. Click Device to switch A–Z/Z–A, or
 Enable **Show items without automatic checks** in Settings to include devices managed by other software or a manual support page. Their status names where to go: for example, **CORSAIR iCUE**, **CORSAIR SSD Toolbox** or **Microsoft Gaming Services**. Use **Open update page** for the official website. These labels do not mean an update is available. Unknown software owners are not assigned guessed download links.
 
 Settings save when you click back onto the main window or press **Esc**. BIOS and firmware options are on the right; background options are on the left.
+
+## Installed vendor apps
+
+When a supported app is detected, its action becomes **Open iCUE**, **Open NVIDIA App**, **Open AMD Install Manager** or the corresponding app name. DriverLoom reads local installation registrations and standard program locations, verifies the executable's vendor signature and checks it again before opening. Custom local installation folders can be discovered through their registrations. Apps open only when you select an Open action; no update command or silent installation is sent.
+
+Supported launchers are AMD Install Manager, AMD Software as a graphics-only fallback, NVIDIA App, CORSAIR iCUE, CORSAIR SSD Toolbox and Samsung Magician. Other devices retain their official website actions.
+
+Two or more visible devices using the same detected launcher share a compact header and one Open button. Each device keeps its own installed/available version and status. iCUE peripherals and SSD Toolbox drives stay separate. Double-click a group for individual device details, official websites and source editing. Right-click any device or group for details and official links. Status sorting moves a group together and puts groups with available updates first. App-managed firmware is not labelled up to date without a verified comparison.
 
 ## Checks and background operation
 
@@ -67,6 +77,7 @@ DriverLoom requires no account and contains no analytics, advertising or usage t
 - **Update checks:** checks contact Windows Update and manufacturer sites at the frequency you select, or when you use refresh. Some manufacturer lookups include hardware-model and Windows-version details.
 - **App update checks:** the startup check contacts the public DriverLoom GitHub release API without an account, hardware details or diagnostic files. You can disable it in Settings. Manual app checks contact the same API.
 - **Optional catalogs and links:** catalog metadata is fetched if you configure a repository. Opening a vendor, installer or repository link visits that site in your browser. Manufacturer logos are bundled locally and make no network requests.
+- **Installed applications:** launcher discovery reads local installation and executable metadata; app paths are not uploaded. Open actions start the verified vendor application with its normal permissions and settings. Those applications apply their own privacy policies.
 
 External services can see normal connection information, including your connection's public IP address, and apply their own privacy policies. Windows Update's data handling is governed by Windows and Microsoft.
 

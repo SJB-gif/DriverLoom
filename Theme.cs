@@ -252,6 +252,25 @@ namespace DriverLoom.UI
             using (Pen pen = new Pen(Palette.Border)) e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
         }
     }
+    public class LauncherGroupInfo
+    {
+        public const int HeaderHeight = 44, ItemHeight = 28;
+        public string[] Devices, Statuses, Installed, Available;
+        public int Rank;
+    }
+    public class DeviceActionCell : DataGridViewButtonCell
+    {
+        protected override Rectangle GetContentBounds(Graphics graphics, DataGridViewCellStyle style, int rowIndex)
+        {
+            if (DataGridView != null && rowIndex >= 0 && DataGridView.Rows[rowIndex].HeaderCell.Tag is LauncherGroupInfo)
+                return new Rectangle(10, 6, Math.Max(1, DataGridView.Columns[ColumnIndex].Width - 24), 32);
+            return base.GetContentBounds(graphics, style, rowIndex);
+        }
+    }
+    public class DeviceActionColumn : DataGridViewButtonColumn
+    {
+        public DeviceActionColumn() { CellTemplate = new DeviceActionCell(); FlatStyle = FlatStyle.Flat; }
+    }
     public class DeviceGrid : DataGridView
     {
         static readonly System.Collections.Generic.Dictionary<string, Image[]> manufacturerLogos = new System.Collections.Generic.Dictionary<string, Image[]>(StringComparer.OrdinalIgnoreCase);
@@ -309,6 +328,8 @@ namespace DriverLoom.UI
             public HardwareRowComparer(string column, bool descending) { this.column = column; this.descending = descending; }
             static int StatusRank(DataGridViewRow row)
             {
+                LauncherGroupInfo group = row.HeaderCell.Tag as LauncherGroupInfo;
+                if (group != null) return group.Rank;
                 string status = Convert.ToString(row.Cells["Status"].Value);
                 if (status == "UPDATE AVAILABLE" || status == "READY TO INSTALL") return 0;
                 if (status == "UP TO DATE") return 1;
@@ -345,11 +366,18 @@ namespace DriverLoom.UI
         {
             if (!Decorated || e.RowIndex < 0 || e.ColumnIndex < 0) { base.OnCellPainting(e); return; }
             string column = Columns[e.ColumnIndex].Name;
-            if (column != "Device" && column != "Status" && column != "Source") { base.OnCellPainting(e); return; }
+            if (column != "Device" && column != "Status" && column != "Source" && !(Rows[e.RowIndex].HeaderCell.Tag is LauncherGroupInfo)) { base.OnCellPainting(e); return; }
             e.PaintBackground(e.ClipBounds, true);
             Rectangle bounds = e.CellBounds;
             string value = Convert.ToString(e.FormattedValue);
             Graphics g = e.Graphics;
+            LauncherGroupInfo group = Rows[e.RowIndex].HeaderCell.Tag as LauncherGroupInfo;
+            if (group != null)
+            {
+                PaintLauncherGroup(e, group);
+                e.Handled = true;
+                return;
+            }
             if (column == "Device")
             {
                 Rectangle icon = new Rectangle(bounds.X + 16, bounds.Y + (bounds.Height - 32) / 2, 32, 32);
@@ -383,12 +411,44 @@ namespace DriverLoom.UI
                 Rectangle button = new Rectangle(bounds.X + 10, bounds.Y + (bounds.Height - 32) / 2, Math.Max(1, bounds.Width - 24), 32);
                 using (SolidBrush brush = new SolidBrush(active ? Palette.Primary : Palette.Background)) g.FillRectangle(brush, button);
                 using (Pen pen = new Pen(Palette.Border)) g.DrawRectangle(pen, button);
-                using (Font font = new Font("Consolas", 8.5f, FontStyle.Bold)) TextRenderer.DrawText(g, value.ToUpperInvariant(), font, button, active ? Palette.OnPrimary : link ? Palette.Text : Palette.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                using (Font font = new Font("Consolas", 8.5f, FontStyle.Bold)) TextRenderer.DrawText(g, value.ToUpperInvariant(), font, button, active ? Palette.OnPrimary : link ? Palette.Text : Palette.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
             }
             using (Pen line = new Pen(Palette.Border)) g.DrawLine(line, bounds.Left, bounds.Bottom - 1, bounds.Right, bounds.Bottom - 1);
             if ((e.State & DataGridViewElementStates.Selected) != 0 && column == "Device")
                 using (SolidBrush brush = new SolidBrush(Palette.Accent)) g.FillRectangle(brush, bounds.Left, bounds.Top, 2, bounds.Height - 1);
             e.Handled = true;
+        }
+        void PaintLauncherGroup(DataGridViewCellPaintingEventArgs e, LauncherGroupInfo group)
+        {
+            Rectangle b = e.CellBounds;
+            Graphics g = e.Graphics;
+            string column = Columns[e.ColumnIndex].Name, value = Convert.ToString(e.FormattedValue);
+            if (column == "Device")
+            {
+                DrawDevice(g, new Rectangle(b.X + 16, b.Y + 6, 30, 30), Convert.ToString(Rows[e.RowIndex].Cells["Device"].Tag));
+                using (Font font = new Font("Segoe UI", 10, FontStyle.Bold)) TextRenderer.DrawText(g, value, font, new Rectangle(b.X + 62, b.Y + 6, Math.Max(1, b.Width - 76), 30), Palette.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+            else if (column == "Status")
+            {
+                using (Font font = new Font("Consolas", 8.5f, FontStyle.Bold)) TextRenderer.DrawText(g, value, font, new Rectangle(b.X + 14, b.Y + 6, Math.Max(1, b.Width - 28), 30), group.Rank == 0 ? Palette.Accent : group.Rank == 1 ? Palette.Positive : Palette.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+            else if (column == "Source")
+            {
+                Rectangle button = new Rectangle(b.X + 10, b.Y + 6, Math.Max(1, b.Width - 24), 32);
+                using (Pen pen = new Pen(Palette.Border)) g.DrawRectangle(pen, button);
+                using (Font font = new Font("Consolas", 8.5f, FontStyle.Bold)) TextRenderer.DrawText(g, value.ToUpperInvariant(), font, button, Palette.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            }
+            for (int i = 0; i < group.Devices.Length; i++)
+            {
+                int y = b.Y + LauncherGroupInfo.HeaderHeight + i * LauncherGroupInfo.ItemHeight;
+                string text = column == "Device" ? group.Devices[i] : column == "Status" ? group.Statuses[i] : column == "Installed" ? group.Installed[i] : column == "Available" ? group.Available[i] : "";
+                Color color = column == "Status" && text == "UPDATE AVAILABLE" ? Palette.Accent : column == "Status" && text == "UP TO DATE" ? Palette.Positive : Palette.Muted;
+                int inset = column == "Device" ? 32 : 14;
+                using (Font font = new Font(column == "Device" ? "Segoe UI" : "Consolas", 8.5f)) TextRenderer.DrawText(g, text, font, new Rectangle(b.X + inset, y, Math.Max(1, b.Width - inset - 12), LauncherGroupInfo.ItemHeight), color, TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+            using (Pen line = new Pen(Palette.Border)) g.DrawLine(line, b.Left, b.Bottom - 1, b.Right, b.Bottom - 1);
+            if ((e.State & DataGridViewElementStates.Selected) != 0 && column == "Device")
+                using (SolidBrush brush = new SolidBrush(Palette.Accent)) g.FillRectangle(brush, b.Left, b.Top, 2, b.Height - 1);
         }
         static void DrawDevice(Graphics g, Rectangle r, string kind)
         {
