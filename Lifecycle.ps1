@@ -6,7 +6,7 @@ function Get-SetupExitName([string]$root) {
 }
 
 function Initialize-LifecyclePreferences($preferences) {
-    $defaults=@{CheckFrequency='On opening';KeepRunningInTray=$false;StartWithWindows=$false;CheckAppUpdates=$true}
+    $defaults=@{CheckFrequency='On opening';KeepRunningInTray=$false;StartWithWindows=$false;CheckAppUpdates=$true;GroupBy='Application'}
     foreach($name in $defaults.Keys){
         if(!$preferences.PSObject.Properties[$name]){$preferences|Add-Member NoteProperty $name $defaults[$name]}
     }
@@ -15,6 +15,7 @@ function Initialize-LifecyclePreferences($preferences) {
         if($preferences.$name -isnot [bool]){$preferences.$name=$false}
     }
     if($preferences.CheckAppUpdates -isnot [bool]){$preferences.CheckAppUpdates=$true}
+    if($preferences.GroupBy -notin 'Application','Hardware type'){$preferences.GroupBy='Application'}
 }
 
 function Test-AutomaticCheckDue([string]$frequency, [DateTimeOffset]$now, $lastAttempt, $lastSuccess, [bool]$onOpening=$false) {

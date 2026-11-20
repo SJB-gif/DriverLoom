@@ -2,7 +2,7 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'Engine.ps1')
 . (Join-Path $PSScriptRoot 'AppUpdates.ps1')
 function Assert-AppUpdate($expected,$actual,[string]$description){if($actual -cne $expected){throw "$description expected '$expected', got '$actual'."}}
-$script:releaseFixture=[pscustomobject]@{tag_name='v0.2.0';draft=$false;prerelease=$false;html_url='https://github.com/SJB-gif/DriverLoom/releases/tag/v0.2.0';assets=@([pscustomobject]@{name='DriverLoom-Setup.exe';state='uploaded';size=1200000;browser_download_url='https://github.com/SJB-gif/DriverLoom/releases/download/v0.2.0/DriverLoom-Setup.exe'})}
+$script:releaseFixture=[pscustomobject]@{tag_name='v0.2.0';draft=$false;prerelease=$false;html_url='https://github.com/SJB-gif/DriverLoom/releases/tag/v0.2.0';assets=@([pscustomobject]@{name='DriverLoom-Setup.exe';state='uploaded';size=1200000;digest='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';browser_download_url='https://github.com/SJB-gif/DriverLoom/releases/download/v0.2.0/DriverLoom-Setup.exe'})}
 $script:fixtureFailure=$false
 function Read-WebSource([string]$url,[int]$limit){
     Assert-AppUpdate 'https://api.github.com/repos/SJB-gif/DriverLoom/releases/latest' $url 'app updates use the fixed DriverLoom release API'
@@ -18,7 +18,7 @@ Assert-AppUpdate $false (Get-AppUpdateInfo '0.3.0').UpdateAvailable 'development
 $script:releaseFixture.tag_name='v0.2.0.0';$script:releaseFixture.html_url='https://github.com/SJB-gif/DriverLoom/releases/tag/v0.2.0.0'
 Assert-AppUpdate $false (Get-AppUpdateInfo '0.2.0').UpdateAvailable 'a trailing zero in the release does not create an update loop'
 $script:releaseFixture.tag_name='v0.2.0';$script:releaseFixture.html_url='https://github.com/SJB-gif/DriverLoom/releases/tag/v0.2.0'
-foreach($case in 'draft','prerelease','foreign-release','foreign-installer','missing-installer','duplicate-installer','incomplete-installer','invalid-version','network'){
+foreach($case in 'draft','prerelease','foreign-release','foreign-installer','missing-installer','duplicate-installer','incomplete-installer','missing-digest','invalid-version','network'){
     $copy=$script:releaseFixture|ConvertTo-Json -Depth 5
     switch($case){
         'draft'{$script:releaseFixture.draft=$true}
@@ -28,6 +28,7 @@ foreach($case in 'draft','prerelease','foreign-release','foreign-installer','mis
         'missing-installer'{$script:releaseFixture.assets=@()}
         'duplicate-installer'{$script:releaseFixture.assets+=@($script:releaseFixture.assets[0])}
         'incomplete-installer'{$script:releaseFixture.assets[0].state='new'}
+        'missing-digest'{$script:releaseFixture.assets[0].digest=''}
         'invalid-version'{$script:releaseFixture.tag_name='v0.2.0-rc1'}
         'network'{$script:fixtureFailure=$true}
     }

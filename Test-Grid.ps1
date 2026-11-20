@@ -66,5 +66,15 @@ try{
     $bounds=$groupRow.Cells['Source'].GetContentBounds($groupRow.Index)
     Assert-Grid 32 $bounds.Height 'group action exposes a real button hit area'
     Assert-Grid $true ($bounds.Bottom -le [DriverLoom.UI.LauncherGroupInfo]::HeaderHeight) 'only the group header button is clickable'
+    $grid.Rows.Clear()
+    foreach($fixture in @(@('Storage',1,$true,'Storage',''),@('Storage',1,$false,'SSD','UP TO DATE'),@('Graphics',0,$true,'Graphics',''),@('Graphics',0,$false,'Zeta GPU','UP TO DATE'),@('Graphics',0,$false,'Alpha GPU','UPDATE AVAILABLE'))){
+        $i=$grid.Rows.Add(@($fixture[3],'1','2',$fixture[4],'Open'))
+        $category=[DriverLoom.UI.HardwareCategoryInfo]::new();$category.Name=$fixture[0];$category.Rank=$fixture[1];$category.IsHeader=$fixture[2];$grid.Rows[$i].HeaderCell.Tag=$category
+    }
+    $grid.SortHardwareBy('Status')
+    Assert-Grid 'Graphics|Alpha GPU|Zeta GPU|Storage|SSD' (Get-DeviceOrder $grid) 'status sorting puts categories with updates first and retains each header with its devices'
+    Assert-Grid $true $grid.Rows[0].Cells['Source'].GetContentBounds(0).IsEmpty 'category headers have no action hit area'
+    $grid.SortHardwareBy('Device');$grid.SortHardwareBy('Device')
+    Assert-Grid 'Storage|SSD|Graphics|Zeta GPU|Alpha GPU' (Get-DeviceOrder $grid) 'descending category/device sorting never separates a heading from its members'
     Write-Output 'Hardware list checks passed: device A-Z/Z-A, fixed status groups, application order, disabled headers, refreshed ordering and comparison labels.'
 }finally{$grid.Dispose()}

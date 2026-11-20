@@ -258,10 +258,33 @@ namespace DriverLoom.UI
         public string[] Devices, Statuses, Installed, Available;
         public int Rank;
     }
+    public class DownloadProgress : Control
+    {
+        int value;
+        public int Value { get { return value; } set { this.value = Math.Max(0, Math.Min(100, value)); AccessibleName = this.value + "% downloaded"; Invalidate(); } }
+        public DownloadProgress() { DoubleBuffered = true; AccessibleRole = AccessibleRole.ProgressBar; }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            using (SolidBrush brush = new SolidBrush(Palette.Surface)) e.Graphics.FillRectangle(brush, ClientRectangle);
+            using (SolidBrush brush = new SolidBrush(Palette.Accent)) e.Graphics.FillRectangle(brush, 0, 0, Width * value / 100, Height);
+            using (Pen pen = new Pen(Palette.Border)) e.Graphics.DrawRectangle(pen, 0, 0, Math.Max(0, Width - 1), Math.Max(0, Height - 1));
+        }
+    }
+    public class HardwareCategoryInfo
+    {
+        public string Name;
+        public bool IsHeader;
+        public int Rank;
+    }
     public class DeviceActionCell : DataGridViewButtonCell
     {
         protected override Rectangle GetContentBounds(Graphics graphics, DataGridViewCellStyle style, int rowIndex)
         {
+            if (DataGridView != null && rowIndex >= 0)
+            {
+                HardwareCategoryInfo category = DataGridView.Rows[rowIndex].HeaderCell.Tag as HardwareCategoryInfo;
+                if (category != null && category.IsHeader) return Rectangle.Empty;
+            }
             if (DataGridView != null && rowIndex >= 0 && DataGridView.Rows[rowIndex].HeaderCell.Tag is LauncherGroupInfo)
                 return new Rectangle(10, 6, Math.Max(1, DataGridView.Columns[ColumnIndex].Width - 24), 32);
             return base.GetContentBounds(graphics, style, rowIndex);
@@ -339,6 +362,18 @@ namespace DriverLoom.UI
             public int Compare(object x, object y)
             {
                 DataGridViewRow left = (DataGridViewRow)x, right = (DataGridViewRow)y;
+                HardwareCategoryInfo lc = left.HeaderCell.Tag as HardwareCategoryInfo, rc = right.HeaderCell.Tag as HardwareCategoryInfo;
+                if (lc != null && rc != null)
+                {
+                    if (lc.Name != rc.Name)
+                    {
+                        int priority = column == "Status" ? lc.Rank.CompareTo(rc.Rank) : 0;
+                        if (priority != 0) return priority;
+                        int category = StringComparer.OrdinalIgnoreCase.Compare(lc.Name, rc.Name);
+                        return column == "Device" && descending ? -category : category;
+                    }
+                    if (lc.IsHeader != rc.IsHeader) return lc.IsHeader ? -1 : 1;
+                }
                 if (column == "Status")
                 {
                     int rank = StatusRank(left).CompareTo(StatusRank(right));
@@ -366,6 +401,16 @@ namespace DriverLoom.UI
         {
             if (!Decorated || e.RowIndex < 0 || e.ColumnIndex < 0) { base.OnCellPainting(e); return; }
             string column = Columns[e.ColumnIndex].Name;
+            HardwareCategoryInfo category = Rows[e.RowIndex].HeaderCell.Tag as HardwareCategoryInfo;
+            if (category != null && category.IsHeader)
+            {
+                using (SolidBrush brush = new SolidBrush(Palette.Surface)) e.Graphics.FillRectangle(brush, e.CellBounds);
+                if (column == "Device")
+                    using (Font font = new Font("Consolas", 9, FontStyle.Bold)) TextRenderer.DrawText(e.Graphics, category.Name.ToUpperInvariant(), font, new Rectangle(e.CellBounds.X + 16, e.CellBounds.Y, Math.Max(1, e.CellBounds.Width - 24), e.CellBounds.Height), Palette.Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                using (Pen pen = new Pen(Palette.Border)) e.Graphics.DrawLine(pen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right, e.CellBounds.Bottom - 1);
+                e.Handled = true;
+                return;
+            }
             if (column != "Device" && column != "Status" && column != "Source" && !(Rows[e.RowIndex].HeaderCell.Tag is LauncherGroupInfo)) { base.OnCellPainting(e); return; }
             e.PaintBackground(e.ClipBounds, true);
             Rectangle bounds = e.CellBounds;

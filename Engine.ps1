@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.15'
+$script:LauncherVersion = '0.1.16'
 . (Join-Path $PSScriptRoot 'Coverage.ps1')
 . (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 

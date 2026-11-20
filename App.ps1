@@ -10,6 +10,7 @@ if($SmokeTest){[Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.F
 . (Join-Path $PSScriptRoot 'Theme.ps1')
 . (Join-Path $PSScriptRoot 'Lifecycle.ps1')
 . (Join-Path $PSScriptRoot 'AppUpdates.ps1')
+. (Join-Path $PSScriptRoot 'AppDownloads.ps1')
 . (Join-Path $PSScriptRoot 'VendorApps.ps1')
 
 if(!$SmokeTest){
@@ -77,6 +78,9 @@ $script:lastNotifiedAppTag=''
 $script:showingAppUpdate=$false
 $script:appUpdateButton=$null
 $script:driverInstallLock=$null
+$script:appDownload=$null
+$script:appSetupProcess=$null
+$script:restoringGroupChoice=$false
 $script:vendorApps=@{}
 if(!$SmokeTest){$script:vendorApps=Get-InstalledVendorApps}
 elseif($env:DRIVERLOOM_TEST_VENDOR_APPS){
@@ -92,7 +96,7 @@ function Receive-SetupExitRequest {
 }
 
 function Start-AppUpdateCheck([switch]$Manual) {
-    if($SmokeTest){return}
+    if($SmokeTest -or $script:appDownload -or $script:appSetupProcess){return}
     if($Manual){$script:appUpdateManual=$true}
     if($script:appUpdateJob){return}
     try{
@@ -110,14 +114,78 @@ function Start-AppUpdateCheck([switch]$Manual) {
 function Show-AppUpdateNotice($info,[switch]$Preview) {
     $dialog=New-Dialog 'DriverLoom update available' 286
     Add-DialogHeading $dialog 'A new DriverLoom is available' ('Installed '+$info.CurrentVersion+'  /  Available '+$info.LatestVersion)
-    Add-Label $dialog 'Download the installer from the official DriverLoom GitHub release, then run it. Setup closes DriverLoom before upgrading and keeps your settings.' 112 64
-    $download=New-Button 'Download installer';$download.Primary=$true;$download.SetBounds(24,222,216,36);$download.DialogResult='OK'
+    Add-Label $dialog 'DriverLoom will download and verify its official installer, then open setup. Choose your normal installation options. Setup closes DriverLoom and keeps your settings.' 112 64
+    $download=New-Button 'Download and install';$download.Primary=$true;$download.SetBounds(24,222,216,36);$download.DialogResult='OK'
     $notes=New-Button 'Release notes';$notes.SetBounds(252,222,178,36);$notes.Tag=$info.ReleaseUrl;$notes.Add_Click({param($sender,$eventArgs)Open-Link $sender.Tag})
     $later=New-Button 'Later';$later.SetBounds(531,222,110,36);$later.DialogResult='Cancel'
     $dialog.Controls.AddRange(@($download,$notes,$later));$dialog.CancelButton=$later
     if($Preview){$dialog.Add_Shown({param($sender,$eventArgs)Save-FormPreview $sender 'app-update';$sender.Close()})}
     try{$choice=$dialog.ShowDialog($form)}finally{$dialog.Dispose()}
-    if(!$Preview -and $choice -eq 'OK'){Open-Link $info.InstallerUrl}
+    if(!$Preview -and $choice -eq 'OK'){Install-AppUpdate $info}
+}
+
+function Cancel-AppDownload {
+    if(!$script:appDownload -or !$script:appDownload.Job){return}
+    [IO.File]::WriteAllText($script:appDownload.CancelPath,'cancel')
+    $script:appDownload.Cancelled=$true;$script:appDownload.Label.Text='Cancelling download...'
+    $script:appDownload.CancelButton.Enabled=$false
+}
+
+function Receive-AppDownload {
+    $state=$script:appDownload
+    if(!$state -or !$state.Job){return}
+    $records=@($state.Job.ChildJobs[0].Progress)
+    if($records.Count -and !$state.Cancelled){$progress=$records[-1];$state.Progress.Value=[Math]::Max(0,[Math]::Min(100,$progress.PercentComplete));$state.Label.Text=([string]$state.Progress.Value+'%  '+$progress.StatusDescription)}
+    if($state.Job.State -notin 'Completed','Failed','Stopped'){return}
+    $job=$state.Job;$state.Job=$null
+    try{$state.Path=[string](Receive-Job -Job $job -ErrorAction Stop);if(!$state.Path -and !$state.Cancelled){throw 'No verified installer was returned.'}}
+    catch{if(!$state.Cancelled){$state.Failure=$_.Exception.Message}}
+    finally{Remove-Job -Job $job -Force}
+    if($state.Cancelled -and $state.Path){[IO.File]::Delete($state.Path);$state.Path=''}
+    $state.Closing=$true;$state.Dialog.Close()
+}
+
+function New-AppDownloadDialog($info) {
+    $dialog=New-Dialog 'Updating DriverLoom' 286
+    Add-DialogHeading $dialog 'Updating DriverLoom' ('Downloading version '+$info.LatestVersion)
+    $label=[Windows.Forms.Label]::new();$label.Text='Connecting to the official GitHub release...';$label.SetBounds(24,108,617,40);$dialog.Controls.Add($label)
+    $progress=[DriverLoom.UI.DownloadProgress]::new();$progress.SetBounds(24,158,617,10);$dialog.Controls.Add($progress)
+    $cancel=New-Button 'Cancel';$cancel.SetBounds(531,222,110,36);$dialog.Controls.Add($cancel)
+    $dialog.Tag=[pscustomobject]@{Progress=$progress;Label=$label;CancelButton=$cancel}
+    return $dialog
+}
+
+function Install-AppUpdate($info) {
+    if($SmokeTest -or $script:job -or $script:installer -or $script:appDownload -or $script:appSetupProcess){return}
+    $dialog=$null;$path='';$failure=''
+    try{
+        Assert-AppDownloadInfo $info $script:LauncherVersion
+        $folder=Join-Path $directory ('downloads\'+$info.LatestVersion+'-'+[guid]::NewGuid().ToString('N'))
+        [void][IO.Directory]::CreateDirectory($folder)
+        $dialog=New-AppDownloadDialog $info
+        $script:appDownload=[pscustomobject]@{Dialog=$dialog;Progress=$dialog.Tag.Progress;Label=$dialog.Tag.Label;CancelButton=$dialog.Tag.CancelButton;CancelPath=(Join-Path $folder 'cancel');Job=$null;Cancelled=$false;Closing=$false;Path='';Failure=''}
+        $dialog.Tag.CancelButton.Add_Click({Cancel-AppDownload})
+        $dialog.Add_FormClosing({param($sender,$eventArgs)if($script:appDownload -and !$script:appDownload.Closing){$eventArgs.Cancel=$true;Cancel-AppDownload}})
+        $script:appDownload.Job=Start-Job -ArgumentList $PSScriptRoot,$info,$script:LauncherVersion,$folder -ScriptBlock {
+            param($root,$info,$version,$folder)
+            $ErrorActionPreference='Stop';[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+            . (Join-Path $root 'AppDownloads.ps1')
+            Receive-AppInstaller $info $version $folder
+        }
+        Update-Controls
+        [void]$dialog.ShowDialog($form)
+        $path=$script:appDownload.Path;$failure=$script:appDownload.Failure
+    }catch{$failure=$_.Exception.Message}
+    finally{
+        if($script:appDownload -and $script:appDownload.Job){Cancel-AppDownload;Remove-Job -Job $script:appDownload.Job -Force}
+        $script:appDownload=$null;if($dialog){$dialog.Dispose()}
+    }
+    if($path){
+        try{$script:appSetupProcess=Start-AppInstaller $path $info $script:LauncherVersion}
+        catch{$failure='Setup could not be opened. '+$_.Exception.Message}
+    }
+    Update-Controls
+    if($failure){Show-Message ('DriverLoom could not complete the update. '+$failure+"`r`nUse Check app updates to try again.")}
 }
 
 function Receive-AppUpdateCheck {
@@ -133,7 +201,7 @@ function Receive-AppUpdateCheck {
         elseif($info.UpdateAvailable){$script:appUpdateInfo=$info;if($manual){$script:lastNotifiedAppTag=''}}
         else{$script:appUpdateInfo=$null;if($manual){Show-Message ('No newer published DriverLoom release is available.'+"`r`n`r`nInstalled: "+$info.CurrentVersion+"`r`nLatest published: "+$info.LatestVersion)}}
     }
-    if($script:appUpdateInfo -and $script:appUpdateInfo.Tag -ne $script:lastNotifiedAppTag -and !$script:showingAppUpdate -and !$script:installer -and !$script:settingsWindow -and $form.Visible -and $form.Enabled){
+    if($script:appUpdateInfo -and $script:appUpdateInfo.Tag -ne $script:lastNotifiedAppTag -and !$script:showingAppUpdate -and !$script:job -and !$script:installer -and !$script:appDownload -and !$script:appSetupProcess -and !$script:settingsWindow -and $form.Visible -and $form.Enabled){
         $script:lastNotifiedAppTag=$script:appUpdateInfo.Tag;$script:showingAppUpdate=$true
         try{Show-AppUpdateNotice $script:appUpdateInfo}finally{$script:showingAppUpdate=$false}
     }
@@ -158,7 +226,7 @@ function Invoke-ScheduledCheck {
     $now=[DateTimeOffset]::UtcNow
     if($now -lt $script:nextSchedulePoll){return}
     $script:nextSchedulePoll=$now.AddMinutes(1)
-    if($script:job -or $script:installer){return}
+    if($script:job -or $script:installer -or $script:appDownload -or $script:appSetupProcess){return}
     if(Test-AutomaticCheckDue $script:settings.CheckFrequency $now $script:lastScanAttempt $script:snapshot.CapturedAt){Start-Scan}
 }
 
@@ -283,7 +351,8 @@ function Refresh-View {
         if($launcher){$action='Open '+$launcher.Name}
         $entries.Add([pscustomobject]@{Name=$name;Device=$row;Url=$check.Url;Check=$check;Launcher=$launcher;DisplayStatus=Get-DisplayStatus $check.Status $manager;Manager=$manager;Action=$action})
     }
-    foreach($display in @(Get-LauncherDisplayGroups $entries.ToArray())){
+    $displays=if($script:settings.GroupBy -eq 'Hardware type'){@($entries|ForEach-Object{[pscustomobject]@{IsGroup=$false;Items=@($_)}})}else{@(Get-LauncherDisplayGroups $entries.ToArray())}
+    foreach($display in $displays){
         $items=@($display.Items);$first=$items[0]
         if($display.IsGroup){
             $launcher=$first.Launcher
@@ -319,6 +388,28 @@ function Refresh-View {
         $hardware.Rows[$i].Tag = [pscustomobject]@{ Offer=$offer; Url=''; Check=$null; Device=$null }
         $hardware.Rows[$i].Cells['Device'].Tag='Microsoft  /  Windows Update'
         $hardware.Rows[$i].Cells['Device'].ToolTipText=$offer.Title
+    }
+    if($script:settings.GroupBy -eq 'Hardware type'){
+        $categories=@{}
+        foreach($gridRow in @($hardware.Rows)){
+            $category=if($gridRow.Tag.Offer){'Windows Update'}else{Get-HardwareCategory $gridRow.Tag.Device}
+            if(!$categories.ContainsKey($category)){$categories[$category]=[Collections.Generic.List[object]]::new()}
+            $categories[$category].Add($gridRow)
+        }
+        foreach($category in $categories.Keys){
+            $rank=3
+            foreach($gridRow in $categories[$category]){
+                $state=[string]$gridRow.Cells['Status'].Value
+                $priority=if($state -in 'UPDATE AVAILABLE','READY TO INSTALL'){0}elseif($state -eq 'UP TO DATE'){1}elseif($gridRow.Cells['Status'].Tag -eq 'UpdateMethod'){2}else{3}
+                $rank=[Math]::Min($rank,$priority)
+            }
+            foreach($gridRow in $categories[$category]){
+                $info=[DriverLoom.UI.HardwareCategoryInfo]::new();$info.Name=$category;$info.Rank=$rank;$gridRow.HeaderCell.Tag=$info
+            }
+            $index=$hardware.Rows.Add(@($category,'','','',''))
+            $headerRow=$hardware.Rows[$index];$headerRow.Height=32;$headerRow.Tag=[pscustomobject]@{IsCategory=$true}
+            $info=[DriverLoom.UI.HardwareCategoryInfo]::new();$info.Name=$category;$info.Rank=$rank;$info.IsHeader=$true;$headerRow.HeaderCell.Tag=$info
+        }
     }
     $hardware.ApplyHardwareSort()
     Update-Footer
@@ -456,7 +547,7 @@ function Save-SettingsWindow($window, [bool]$closingWithOwner=$false) {
         if($closingWithOwner){$repo=$script:settings.Repo}else{throw 'Use owner/repository for the optional catalog, or leave it blank.'}
     }
     $preference=[string]($controls.Themes|Where-Object Checked|Select-Object -First 1).Tag
-    $next=[pscustomobject]@{Repo=$repo;Bios=$controls.Bios.Checked;Sources=@($script:settings.Sources);Theme=$preference;ShowUnsupported=$controls.ShowUnsupported.Checked;CheckFrequency=[string]$controls.Frequency.SelectedItem;KeepRunningInTray=$controls.Tray.Checked;StartWithWindows=$controls.Startup.Checked;CheckAppUpdates=$controls.AppUpdates.Checked}
+    $next=[pscustomobject]@{Repo=$repo;Bios=$controls.Bios.Checked;Sources=@($script:settings.Sources);Theme=$preference;ShowUnsupported=$controls.ShowUnsupported.Checked;CheckFrequency=[string]$controls.Frequency.SelectedItem;KeepRunningInTray=$controls.Tray.Checked;StartWithWindows=$controls.Startup.Checked;CheckAppUpdates=$controls.AppUpdates.Checked;GroupBy=$script:settings.GroupBy}
     Save-LauncherPreferences $settingsPath $script:settings $next $controls.Launcher
     if($script:snapshot -and $script:settings.Repo -ne $repo){$script:snapshot.Repository=$null;$script:snapshot.Checks=@()}
     $script:settings=$next
@@ -629,7 +720,7 @@ function Show-BiosGuide {
 }
 
 function Start-Scan {
-    if ($script:job -or $script:installer) { return }
+    if ($script:job -or $script:installer -or $script:appDownload -or $script:appSetupProcess) { return }
     if(!$SmokeTest){$script:vendorApps=Get-InstalledVendorApps}
     $script:lastScanAttempt=[DateTimeOffset]::UtcNow.ToString('o')
     $script:fresh = $false
@@ -648,19 +739,20 @@ function Start-Scan {
 
 function Update-Footer {
     $caption=Get-CheckCaption $script:snapshot.CapturedAt
-    $state=if($script:job){'CHECKING'}elseif($script:installer){'UPDATING'}elseif($script:lastScanError){'CHECK FAILED - USE REFRESH'}else{$caption}
+    $state=if($script:appDownload){'DOWNLOADING DRIVERLOOM'}elseif($script:appSetupProcess){'DRIVERLOOM SETUP OPEN'}elseif($script:job){'CHECKING'}elseif($script:installer){'UPDATING'}elseif($script:lastScanError){'CHECK FAILED - USE REFRESH'}else{$caption}
     $status.Text=$state+'  '+[char]0x00B7+'  USING WINDOWS UPDATE & MANUFACTURER SOURCES'
     $tooltips.SetToolTip($status,($script:lastScanError+(@($script:snapshot.Warnings)-join "`r`n")))
     if($repoButton){$repoButton.Image=if([DriverLoom.UI.Palette]::Dark){$githubLight}else{$githubDark}}
 }
 
 function Update-Controls {
-    $busy = $null -ne $script:job -or $null -ne $script:installer
+    $busy = $null -ne $script:job -or $null -ne $script:installer -or $null -ne $script:appDownload -or $null -ne $script:appSetupProcess
     $action=Get-UpdateAction $script:snapshot $script:fresh $busy
     $primary.Visible=$action.Visible -or $null -ne $script:installer
     $primary.Enabled=$action.Enabled
     $primary.Text=if($script:installer){'Updating...'}else{'Update All'}
     $refresh.Enabled=!$busy
+    $groupView.Enabled=!$busy
     $settingsMenu.Enabled=!$busy
     $trayCheck.Enabled=!$busy
     $trayExit.Enabled=$null -eq $script:installer
@@ -701,6 +793,7 @@ function Show-UpdateReview([switch]$Preview) {
 }
 
 function Open-HardwareAction($selection) {
+    if($script:appDownload -or $script:appSetupProcess){return}
     if($selection.Launcher){
         if($SmokeTest){return}
         if($script:installer){Show-Message 'Finish the current driver installation before opening another updater.';return}
@@ -808,11 +901,22 @@ $close.Add_Click({$form.Close()})
 $layout=[Windows.Forms.TableLayoutPanel]::new();$layout.Dock='Fill';$layout.ColumnCount=1;$layout.RowCount=2;$layout.Padding=[Windows.Forms.Padding]::new(24,10,24,0)
 [void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute',66));[void]$layout.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent',100))
 $form.Controls.Add($layout)
-$toolbar=[Windows.Forms.TableLayoutPanel]::new();$toolbar.Dock='Fill';$toolbar.ColumnCount=3;$toolbar.RowCount=1
-[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',42));[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',168))
+$toolbar=[Windows.Forms.TableLayoutPanel]::new();$toolbar.Dock='Fill';$toolbar.ColumnCount=4;$toolbar.RowCount=1
+[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',42));[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent',100));[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',202));[void]$toolbar.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Absolute',168))
 $refresh=[DriverLoom.UI.IconButton]::new();$refresh.Glyph='Refresh';$refresh.AccessibleName='Check for updates';$refresh.Size=[Drawing.Size]::new(32,36);$refresh.Margin=[Windows.Forms.Padding]::new(0,12,0,0);$toolbar.Controls.Add($refresh,0,0);$tooltips.SetToolTip($refresh,'Check for updates')
 $title=[Windows.Forms.Label]::new();$title.Text='Your hardware';$title.Font=[Drawing.Font]::new('Segoe UI',18,[Drawing.FontStyle]::Bold);$title.Dock='Fill';$title.TextAlign='MiddleLeft';$toolbar.Controls.Add($title,1,0)
-$primary=New-Button 'Update All';$primary.Primary=$true;$primary.AutoSize=$false;$primary.Size=[Drawing.Size]::new(162,36);$primary.Margin=[Windows.Forms.Padding]::new(0,14,0,0);$toolbar.Controls.Add($primary,2,0)
+$groupView=[Windows.Forms.ComboBox]::new();$groupView.DropDownStyle='DropDownList';$groupView.AccessibleName='Group devices by';$groupView.Width=186;$groupView.Margin=[Windows.Forms.Padding]::new(0,17,12,0);[void]$groupView.Items.AddRange(@('By application','By hardware type'));$groupView.SelectedIndex=if($script:settings.GroupBy -eq 'Hardware type'){1}else{0};$toolbar.Controls.Add($groupView,2,0);$tooltips.SetToolTip($groupView,'Group devices by application or hardware type')
+$groupView.Add_SelectedIndexChanged({
+    if($script:restoringGroupChoice){return}
+    $next=$script:settings|Select-Object *;$next.GroupBy=if($groupView.SelectedIndex -eq 1){'Hardware type'}else{'Application'}
+    try{Save-LauncherPreferences $settingsPath $script:settings $next (Join-Path $PSScriptRoot 'DriverLoom.exe');$script:settings=$next;Refresh-View}
+    catch{
+        $failure=$_.Exception.Message;$script:restoringGroupChoice=$true
+        try{$groupView.SelectedIndex=if($script:settings.GroupBy -eq 'Hardware type'){1}else{0}}finally{$script:restoringGroupChoice=$false}
+        Show-Message ('The grouping preference could not be saved. '+$failure)
+    }
+})
+$primary=New-Button 'Update All';$primary.Primary=$true;$primary.AutoSize=$false;$primary.Size=[Drawing.Size]::new(162,36);$primary.Margin=[Windows.Forms.Padding]::new(0,14,0,0);$toolbar.Controls.Add($primary,3,0)
 $form.AcceptButton=$primary
 $layout.Controls.Add($toolbar,0,0)
 $hardware=New-Grid ([ordered]@{Device=220;Installed=76;Available=76;Status=130;Source=96})
@@ -844,6 +948,8 @@ $hardwareContext.Add_Opening({param($sender,$eventArgs)$selected=if($hardware.Se
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({
+    Receive-AppDownload
+    if($script:appSetupProcess -and $script:appSetupProcess.HasExited){$script:appSetupProcess.Dispose();$script:appSetupProcess=$null;Update-Controls}
     if(Receive-SetupExitRequest){return}
     Receive-RestoreRequest
     Receive-AppUpdateCheck
@@ -884,6 +990,10 @@ $form.Add_Shown({
             $group=$hardware.Rows|Where-Object{$_.Tag.IsGroup}|Select-Object -First 1
             if($group){Show-LauncherGroup $group.Tag -Preview}
             Show-AppUpdateNotice ([pscustomobject]@{CurrentVersion=$script:LauncherVersion;LatestVersion='0.2.0';ReleaseUrl='https://github.com/SJB-gif/DriverLoom/releases';InstallerUrl=''}) -Preview
+            $progressPreview=New-AppDownloadDialog ([pscustomobject]@{LatestVersion='0.2.0'})
+            $progressPreview.Tag.Progress.Value=64;$progressPreview.Tag.Label.Text='0.8 of 1.2 MB'
+            $progressPreview.Add_Shown({param($sender,$eventArgs)Save-FormPreview $sender 'app-download';$sender.Close()})
+            try{[void]$progressPreview.ShowDialog($form)}finally{$progressPreview.Dispose()}
         }
         $script:smokeResult = [pscustomobject]@{
             Version = $script:LauncherVersion
@@ -911,6 +1021,8 @@ $form.Add_Shown({
             MainStatuses = @($hardware.Rows | ForEach-Object { $_.Cells['Status'].Value })
             ManufacturerLogoCount = [DriverLoom.UI.DeviceGrid]::ManufacturerLogoCount
             CheckAppUpdates = $script:settings.CheckAppUpdates
+            GroupBy = $script:settings.GroupBy
+            HardwareCategories = @($hardware.Rows|Where-Object{$_.Tag.IsCategory}|ForEach-Object{$_.Cells['Device'].Value})
             AppUpdateCheckStarted = $null -ne $script:appUpdateJob
             SetupExitDeferredWhileBusy = $false
             SetupExitClosesWindow = $false
@@ -949,6 +1061,9 @@ $form.Add_Shown({
         }
         if($env:DRIVERLOOM_TEST_SETTINGS -eq '1'){
             $originalVisibility=$script:settings.ShowUnsupported
+            $originalGroupIndex=$groupView.SelectedIndex;$groupView.SelectedIndex=1
+            $groupSaved=(Get-Content -LiteralPath $settingsPath -Raw|ConvertFrom-Json).GroupBy -eq 'Hardware type'
+            $groupSwitched=@($hardware.Rows|Where-Object{$_.Tag.IsCategory}).Count -gt 0
             Edit-Settings
             $window=$script:settingsWindow
             $modeless=$form.Enabled -and !$window.Modal -and $window.Owner -eq $form
@@ -966,6 +1081,7 @@ $form.Add_Shown({
             $dismissed=$window.IsDisposed
             $saved=Get-Content -LiteralPath $settingsPath -Raw|ConvertFrom-Json
             $persisted=$saved.ShowUnsupported -eq !$originalVisibility
+            $groupKept=$saved.GroupBy -eq 'Hardware type'
             Edit-Settings
             $reopened=$script:settingsWindow
             $reloaded=$reopened.Tag.ShowUnsupported.Checked -eq !$originalVisibility
@@ -973,7 +1089,8 @@ $form.Add_Shown({
             $escape=[Windows.Forms.KeyEventArgs]::new([Windows.Forms.Keys]::Escape)
             $keyHandler=$reopened.GetType().GetMethod('OnKeyDown',[Reflection.BindingFlags]'Instance,NonPublic')
             $null=$keyHandler.Invoke($reopened,@($escape))
-            $script:smokeResult.SettingsProbe=[pscustomobject]@{Modeless=$modeless;NoCloseButtons=$noClose;NoOtherMethodsButton=$noOtherMethods;CardsSwapped=$swapped;InsideClickIgnored=$insideIgnored;InvalidCatalogBlocksDismiss=$blocked;OutsideClickConsumed=$consumed;OutsideClickDismisses=$dismissed;PreferencesPersist=$persisted;ReopenLoadsPreferences=$reloaded;EscapeDismisses=$reopened.IsDisposed -and $escape.Handled}
+            $groupView.SelectedIndex=$originalGroupIndex
+            $script:smokeResult.SettingsProbe=[pscustomobject]@{GroupChoiceSaved=$groupSaved;GroupViewSwitches=$groupSwitched;SettingsKeepGroupChoice=$groupKept;Modeless=$modeless;NoCloseButtons=$noClose;NoOtherMethodsButton=$noOtherMethods;CardsSwapped=$swapped;InsideClickIgnored=$insideIgnored;InvalidCatalogBlocksDismiss=$blocked;OutsideClickConsumed=$consumed;OutsideClickDismisses=$dismissed;PreferencesPersist=$persisted;ReopenLoadsPreferences=$reloaded;EscapeDismisses=$reopened.IsDisposed -and $escape.Handled}
         }
         $script:fresh = $true
         Update-Controls
@@ -1017,6 +1134,8 @@ try {
     $timer.Stop()
     if ($script:job) { Remove-Job -Job $script:job -Force }
     if ($script:appUpdateJob) { Remove-Job -Job $script:appUpdateJob -Force }
+    if ($script:appDownload -and $script:appDownload.Job) { Cancel-AppDownload;Remove-Job -Job $script:appDownload.Job -Force }
+    if ($script:appSetupProcess) { $script:appSetupProcess.Dispose() }
     $timer.Dispose()
     $hardwareContext.Dispose()
     $tray.Visible=$false;$tray.Dispose();$trayMenu.Dispose()

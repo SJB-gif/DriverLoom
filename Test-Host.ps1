@@ -18,7 +18,7 @@ function Invoke-NativeTest([string]$exe,[string[]]$arguments,[int]$expectedExit=
 }
 try{
     [void][IO.Directory]::CreateDirectory($stage)
-    foreach($name in 'App.ps1','Launch.ps1','Engine.ps1','Lifecycle.ps1','AppUpdates.ps1','VendorApps.ps1','Coverage.ps1','Manufacturers.ps1','Install.ps1','Theme.ps1','Theme.cs'){
+    foreach($name in 'App.ps1','Launch.ps1','Engine.ps1','Lifecycle.ps1','AppUpdates.ps1','AppDownloads.ps1','VendorApps.ps1','Coverage.ps1','Manufacturers.ps1','Install.ps1','Theme.ps1','Theme.cs'){
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage $name)
     }
     [void][IO.Directory]::CreateDirectory((Join-Path $stage 'assets'))

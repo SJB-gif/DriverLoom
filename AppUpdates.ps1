@@ -13,11 +13,14 @@ function Get-AppUpdateInfo([string]$currentVersion=$script:LauncherVersion) {
     $normalizedLatest=[version]::new($latest.Major,$latest.Minor,[Math]::Max(0,$latest.Build),[Math]::Max(0,$latest.Revision))
     $available=$normalizedLatest -gt $normalizedCurrent
     $installerUrl=''
+    $installerSize=0;$installerHash=''
     if($available){
         $assets=@($release.assets|Where-Object name -ceq 'DriverLoom-Setup.exe')
         if($assets.Count -ne 1 -or $assets[0].state -ne 'uploaded' -or $assets[0].size -le 0 -or $assets[0].size -gt 67108864){throw 'The release does not contain one completed DriverLoom installer.'}
         $installerUrl='https://github.com/SJB-gif/DriverLoom/releases/download/'+$tag+'/DriverLoom-Setup.exe'
         if([string]$assets[0].browser_download_url -cne $installerUrl){throw 'The installer URL does not belong to this DriverLoom release.'}
+        if([string]$assets[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$'){throw 'The release installer has no verifiable SHA-256 digest.'}
+        $installerSize=[long]$assets[0].size;$installerHash=([string]$assets[0].digest).Substring(7)
     }
-    [pscustomobject]@{CurrentVersion=$currentVersion;LatestVersion=$latest.ToString();Tag=$tag;UpdateAvailable=$available;ReleaseUrl=$releaseUrl;InstallerUrl=$installerUrl}
+    [pscustomobject]@{CurrentVersion=$currentVersion;LatestVersion=$latest.ToString();Tag=$tag;UpdateAvailable=$available;ReleaseUrl=$releaseUrl;InstallerUrl=$installerUrl;InstallerSize=$installerSize;InstallerHash=$installerHash}
 }

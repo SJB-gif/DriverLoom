@@ -8,11 +8,13 @@ Assert-Lifecycle 'On opening' $old.CheckFrequency 'legacy default frequency'
 Assert-Lifecycle $false $old.KeepRunningInTray 'tray opt-in default'
 Assert-Lifecycle $false $old.StartWithWindows 'login opt-in default'
 Assert-Lifecycle $true $old.CheckAppUpdates 'app release checks default to on opening'
-$invalid=[pscustomobject]@{CheckFrequency='Hourly';KeepRunningInTray='yes';StartWithWindows=1}
+Assert-Lifecycle 'Application' $old.GroupBy 'existing application grouping remains the default'
+$invalid=[pscustomobject]@{CheckFrequency='Hourly';KeepRunningInTray='yes';StartWithWindows=1;GroupBy='invalid'}
 Initialize-LifecyclePreferences $invalid
 Assert-Lifecycle 'On opening' $invalid.CheckFrequency 'invalid frequency fallback'
 Assert-Lifecycle $false $invalid.KeepRunningInTray 'invalid tray preference cannot opt in'
 Assert-Lifecycle $false $invalid.StartWithWindows 'invalid startup preference cannot opt in'
+Assert-Lifecycle 'Application' $invalid.GroupBy 'invalid grouping preference falls back to existing view'
 $now=[DateTimeOffset]::Parse('2026-11-19T00:00:00Z')
 Assert-Lifecycle $false (Test-AutomaticCheckDue 'Manual' $now $null $null $true) 'manual never checks automatically'
 Assert-Lifecycle $true (Test-AutomaticCheckDue 'On opening' $now $null $null $true) 'on-opening startup'

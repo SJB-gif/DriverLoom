@@ -6,7 +6,7 @@ Check hardware updates from official sources in one simple Windows app.
 
 Windows 10/11 x64. One installer, installed for the current user. The installer is currently unsigned.
 
-**Latest source/test version: 0.1.15.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
+**Latest source/test version: 0.1.16.** The public release is still **0.1.8**. Newer installers are available from [GitHub Actions builds](https://github.com/SJB-gif/DriverLoom/actions/workflows/build.yml). Release publishing and signing setup are on hold.
 
 ## Code signing policy
 
@@ -31,6 +31,8 @@ Windows 10/11 x64. One installer, installed for the current user. The installer 
 - Startup and manual checks for published DriverLoom updates.
 - Open supported, verified installed vendor apps directly from device actions.
 - Compact groups for devices sharing the same installed launcher, with individual statuses and versions.
+- Switch between application groups and hardware categories such as Graphics, Storage and Audio & media.
+- Download, verify and open DriverLoom's own update installer without using a browser.
 
 Open the gear for Settings, About and Help. Double-click a device for details.
 
@@ -50,6 +52,8 @@ Supported launchers are AMD Install Manager, AMD Software as a graphics-only fal
 
 Two or more visible devices using the same detected launcher share a compact header and one Open button. Each device keeps its own installed/available version and status. iCUE peripherals and SSD Toolbox drives stay separate. Double-click a group for individual device details, official websites and source editing. Right-click any device or group for details and official links. Status sorting moves a group together and puts groups with available updates first. App-managed firmware is not labelled up to date without a verified comparison.
 
+Use **By application** or **By hardware type** above the list. Application grouping is the default; your choice is saved. Hardware categories keep a separate action for each device, so items requiring different software remain distinct. Device sorting orders categories and their members by name. Status sorting puts categories containing updates first, then sorts the devices within each category with updates first. The unsupported-items checkbox applies to both views.
+
 ## Checks and background operation
 
 In Settings, choose **Manual**, **On opening** (default), **Daily** or **Weekly**. Daily and weekly checks respect the last check time and run only while DriverLoom is open or kept in the tray. Checks never install drivers automatically.
@@ -60,7 +64,9 @@ In Settings, choose **Manual**, **On opening** (default), **Daily** or **Weekly*
 
 DriverLoom checks its own latest stable GitHub release on opening. Turn **Check app updates on opening** off in Settings to disable that check, or use **Check app updates** whenever you choose. App checks are separate from the hardware-check schedule and optional source catalog.
 
-When a newer published version is available, a popup offers **Download installer** and **Release notes**. The download opens in your browser; run the downloaded installer to upgrade. Setup closes DriverLoom safely and keeps its preferences. An active driver installation blocks the upgrade. Copies in another Windows session, or an instance setup cannot safely identify, need to be closed manually. A tray startup defers the popup until you reopen DriverLoom.
+When a newer published version is available, a popup offers **Download and install** and **Release notes**. Downloads start only when you choose that action. DriverLoom shows progress and a Cancel button, verifies the release's SHA-256 digest, file size and installer version, then opens normal interactive setup. Windows security checks and shortcut options remain in place. Failed or cancelled downloads are removed; use **Check app updates** to retry. No browser is needed for the installer; release notes still open in your browser.
+
+Setup closes DriverLoom safely and keeps its preferences. An active driver installation blocks the upgrade. Hardware checks and installation actions pause while the app update is downloading or setup is open. Copies in another Windows session, or an instance setup cannot safely identify, need to be closed manually. A tray startup defers the popup until you reopen DriverLoom.
 
 Only published stable releases are offered. Test installers from Actions can be newer than the public release and will not be downgraded.
 
@@ -76,7 +82,8 @@ DriverLoom requires no account and contains no analytics, advertising or usage t
 - **Copy list:** copies the displayed device or package names and reasons to the Windows clipboard when you select it.
 - **Update checks:** checks contact Windows Update and manufacturer sites at the frequency you select, or when you use refresh. Some manufacturer lookups include hardware-model and Windows-version details.
 - **App update checks:** the startup check contacts the public DriverLoom GitHub release API without an account, hardware details or diagnostic files. You can disable it in Settings. Manual app checks contact the same API.
-- **Optional catalogs and links:** catalog metadata is fetched if you configure a repository. Opening a vendor, installer or repository link visits that site in your browser. Manufacturer logos are bundled locally and make no network requests.
+- **App downloads:** choosing Download and install retrieves only DriverLoom's own installer from its public GitHub release and GitHub's release storage. Verified installers are saved under the local data folder's `downloads` directory. No account or diagnostic upload is involved. Verification checks integrity; the installer remains unsigned while signing is on hold.
+- **Optional catalogs and links:** catalog metadata is fetched if you configure a repository. Opening a vendor, release notes or repository link visits that site in your browser. Manufacturer logos are bundled locally and make no network requests.
 - **Installed applications:** launcher discovery reads local installation and executable metadata; app paths are not uploaded. Open actions start the verified vendor application with its normal permissions and settings. Those applications apply their own privacy policies.
 
 External services can see normal connection information, including your connection's public IP address, and apply their own privacy policies. Windows Update's data handling is governed by Windows and Microsoft.

@@ -105,3 +105,15 @@ function Get-LauncherDisplayGroups([object[]]$entries) {
         [pscustomobject]@{IsGroup=$items.Count -gt 1;Items=$items}
     }
 }
+
+function Get-HardwareCategory($device) {
+    switch -Regex ([string]$device.Kind) {
+        '^GPU' {return 'Graphics'}
+        'Audio|Media|Camera' {return 'Audio & media'}
+        'Network|Bluetooth' {return 'Network & Bluetooth'}
+        'Storage' {return 'Storage'}
+        'Chipset|BIOS|CPU|Motherboard|System' {return 'System & chipset'}
+        'Input|USB|HID|Peripheral|Printer' {return 'Peripherals'}
+        default {return 'Other hardware'}
+    }
+}

@@ -59,6 +59,7 @@ function Invoke-StartupCase([string]$name, $snapshot, [bool]$biosEnabled, [strin
     Assert-Startup ([bool]$lifecycle.StartWithWindows) $result.StartWithWindows "$name Windows startup preference"
     Assert-Startup $(if($lifecycle.ContainsKey('CheckAppUpdates')){$lifecycle.CheckAppUpdates}else{$true}) $result.CheckAppUpdates "$name app update preference"
     Assert-Startup $false $result.AppUpdateCheckStarted "$name smoke mode never contacts GitHub"
+    Assert-Startup $(if($lifecycle.ContainsKey('GroupBy')){$lifecycle.GroupBy}else{'Application'}) $result.GroupBy "$name grouping preference"
     Assert-Startup 13 $result.ManufacturerLogoCount "$name bundled manufacturer artwork loads"
     Assert-Startup $true $result.SetupExitDeferredWhileBusy "$name setup cannot interrupt driver installation"
     Assert-Startup $true $result.SetupExitClosesWindow "$name setup request exits even when tray mode is enabled"
@@ -168,6 +169,14 @@ try {
     Assert-Startup $true ($grouped.LauncherGroups[0].Height -lt 140) 'group uses less height than two normal rows'
     Assert-Startup 'iCUE' $grouped.LauncherGroups[0].Status 'unverified firmware is not marked up to date'
     Assert-Startup $true (@($grouped.MainItems.Action) -contains 'Open iCUE') 'group action opens its installed app'
+    $categories=Invoke-StartupCase 'hardware-categories' $groupSnapshot $false '' $true @{GroupBy='Hardware type'} -VendorApps $apps
+    Assert-Startup 0 @($categories.LauncherGroups).Count 'hardware view does not merge devices sharing a launcher'
+    Assert-Startup 'Audio & media|Peripherals|Storage' ($categories.HardwareCategories -join '|') 'hardware categories have clear names and default alphabetical order'
+    Assert-Startup 6 $categories.HardwareRows 'all three devices and their category headers are present'
+    Assert-Startup 2 @($categories.MainItems|Where-Object Action -eq 'Open iCUE').Count 'each device retains its own correct launcher action'
+    Assert-Startup 3 @($categories.MainItems|Where-Object Action).Count 'category headers expose no action'
+    $checkedCategories=Invoke-StartupCase 'hardware-categories-checked' $listSnapshot $false '' $false @{GroupBy='Hardware type'}
+    Assert-Startup 4 @($checkedCategories.MainItems|Where-Object Action).Count 'category view retains current, unavailable and ambiguous devices'
 
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'
