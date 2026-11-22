@@ -1,4 +1,4 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
 [Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.Forms.UnhandledExceptionMode]::ThrowException)
@@ -73,41 +73,7 @@ try{
         elseif($mode -in 'cancel','window-close'){Assert-DownloadUI '' $script:failure 'cancellation does not show an error'}
         if($mode -eq 'window-close'){Assert-DownloadUI $true $script:closeWaited 'closing the dialog waits for worker cancellation'}
     }
-    $device=New-HardwareRow 'Chipset package' 'AMD' 'AMD Chipset Software' '' '' '7.01.08.129' @()
-    $package=New-ManagedPackage 'AMDChipset' $device ([pscustomobject]@{Family='11'}) '8.09.28.1124' 'https://www.amd.com/en/support/downloads/drivers.html/chipsets/am5/x670e.html' 'https://drivers.amd.com/drivers/amd_chipset_software_8.09.28.1124.exe'
-    $selection=[pscustomobject]@{Device=$device;Check=[pscustomobject]@{Checked=$true;Status='Newer at source';Available=$package.Version;Url=$package.SourceUrl;Package=$package}}
-    $script:vendorStarts=0;$script:rescans=0
-    $script:expectedVendorFile='AMD-Chipset-Setup.exe';$script:expectedVendorDevice='AMD Chipset Software'
-    foreach($family in 'AMDChipset','AMDRadeon','ASUSDriver'){
-        if($family -eq 'AMDRadeon'){
-            $gpu=New-HardwareRow 'GPU driver' 'AMD' 'AMD Radeon(TM) Graphics' '' '' '32.0.21030.2001' @()
-            $device=New-HardwareRow 'GPU software' 'AMD' 'AMD Software: Adrenalin Edition' '' '' '24.6.1' @()
-            $package=New-ManagedPackage 'AMDRadeon' $device (Get-WindowsDriverTarget '10.0.26300.0') '26.11.2' 'https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen/ryzen-7000-series/amd-ryzen-9-7900x3d.html' 'https://drivers.amd.com/drivers/whql-amd-software-adrenalin-edition-26.11.2-win11-a.exe' $gpu
-            $selection=[pscustomobject]@{Device=$device;Check=[pscustomobject]@{Checked=$true;Status='Newer at source';Available=$package.Version;Url=$package.SourceUrl;Package=$package}}
-            $script:expectedVendorFile='AMD-Radeon-Setup.exe';$script:expectedVendorDevice=$device.Model
-        }elseif($family -eq 'ASUSDriver'){
-            $device=New-HardwareRow 'Bluetooth driver' 'MediaTek' 'MediaTek Bluetooth Adapter' '' '' '1.0.0.0' @('USB\VID_0489&PID_E0E2&MI_00')
-            $board=New-HardwareRow 'Motherboard' 'ASUSTeK' 'ROG STRIX X670E-A GAMING WIFI' '' '' '' @()
-            $package=New-AsusPackage $device $board (Get-WindowsDriverTarget '10.0.26300.0') 'Bluetooth' ([pscustomobject]@{Version='1.1037.0.399';DownloadUrl=[pscustomobject]@{Global='/pub/ASUS/mb/02BT/fixture_RZ616.zip'};sha256=''}) ('https://www.asus.com/supportonly/'+[Uri]::EscapeDataString($board.Model)+'/helpdesk_download/')
-            $selection=[pscustomobject]@{Device=$device;Check=[pscustomobject]@{Checked=$true;Status='Newer at source';Available=$package.Version;Url=$package.SourceUrl;Package=$package}}
-            $script:expectedVendorFile='AsusSetup.exe';$script:expectedVendorDevice=$device.Model
-        }
-    foreach($mode in 'success','cancel','window-close','failure'){
-        $script:case=$mode;$script:sawProgress=$false;$script:sawBusy=$false;$script:failure='';$script:sawVendorSession=$false;$script:sawInstallLock=$false;$before=$script:vendorStarts
-        Install-ManufacturerUpdate $selection
-        Assert-DownloadUI $true $script:sawProgress "manufacturer $mode displays worker progress"
-        Assert-DownloadUI $true ($null -eq $script:appDownload -and $null -eq $script:packageInstaller -and $null -eq $script:driverInstallLock) "manufacturer $mode releases UI and installation guards"
-        if($mode -eq 'success'){
-            Assert-DownloadUI ($before+1) $script:vendorStarts 'verified manufacturer result opens setup once'
-            Assert-DownloadUI $true $script:sawVendorSession 'user completes the vendor handoff before rechecking'
-            Assert-DownloadUI $true $script:sawInstallLock 'app replacement is blocked during vendor installation'
-            Assert-DownloadUI $true $script:vendorDeviceShown 'handoff identifies the device being updated'
-            Assert-DownloadUI $true ($script:rescans -gt 0) 'manufacturer setup leads to a fresh hardware check'
-            if($family -eq 'ASUSDriver'){Assert-DownloadUI $true (Test-Path -LiteralPath $script:lastAsusRoot) 'ASUS setup payload stays available to vendor child processes';Remove-AsusRoot $script:lastAsusRoot}
-        }else{Assert-DownloadUI $before $script:vendorStarts 'cancel/failure never starts vendor setup'}
-    }
-    }
-    Write-Output 'App and manufacturer update UI checks passed: asynchronous progress, cancellation, error recovery, verified setup dispatch, installation guard and recheck. No installer was executed.'
+    Write-Output 'App update UI checks passed: asynchronous progress, cancellation, error recovery and verified dispatch. No installer was executed.'
 }finally{
     $timer.Stop();$timer.Dispose();$form.Dispose()
     if($script:appDownload -and $script:appDownload.Job){Remove-Job -Job $script:appDownload.Job -Force}

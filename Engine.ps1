@@ -1,9 +1,10 @@
 $ErrorActionPreference = 'Stop'
-$script:LauncherVersion = '0.1.19'
+$script:LauncherVersion = '0.1.20'
 . (Join-Path $PSScriptRoot 'Coverage.ps1')
 . (Join-Path $PSScriptRoot 'Manufacturers.ps1')
 . (Join-Path $PSScriptRoot 'Packages.ps1')
 . (Join-Path $PSScriptRoot 'AsusPackages.ps1')
+. (Join-Path $PSScriptRoot 'DriverLibrary.ps1')
 
 function Save-Json($path, $data) {
     $temp = "$path.$([guid]::NewGuid().ToString('N')).tmp"
@@ -23,7 +24,7 @@ function New-HardwareRow($kind, $manufacturer, $model, $part, $revision, $curren
         Key = $key; Kind = $kind; Manufacturer = ([string]$manufacturer).Trim()
         Model = ([string]$model).Trim(); Part = ([string]$part).Trim(); Revision = ([string]$revision).Trim()
         Current = ([string]$current).Trim(); IDs = @($ids | Where-Object { $_ } | Select-Object -Unique)
-        Provider = $provider; InfName = $infName
+        Provider = $provider; InfName = $infName; InstanceId = ''
     }
 }
 
@@ -91,7 +92,8 @@ function Get-HardwareInventory {
                 $compatibleId = (Get-PnpDeviceProperty -InstanceId $driver.DeviceID -KeyName 'DEVPKEY_Device_CompatibleIds' -ErrorAction SilentlyContinue).Data
             } catch { }
             $ids = @($hardwareId) + @($driver.HardWareID) + @($compatibleId) + @($driver.CompatID)
-            $rows.Add((New-HardwareRow $kind $driver.Manufacturer $driver.DeviceName $driver.HardWareID '' $driver.DriverVersion $ids $driver.DriverProviderName $driver.InfName))
+            $row=New-HardwareRow $kind $driver.Manufacturer $driver.DeviceName $driver.HardWareID '' $driver.DriverVersion $ids $driver.DriverProviderName $driver.InfName
+            $row.InstanceId=$driver.DeviceID;$rows.Add($row)
         }
     } catch { $warnings.Add("Driver inventory: $_") }
     $hardwareRows = $rows.ToArray()

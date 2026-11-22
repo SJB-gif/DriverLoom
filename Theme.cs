@@ -128,7 +128,7 @@ namespace DriverLoom.UI
             ComboBox combo = (ComboBox)sender;
             Color background = (e.State & DrawItemState.Selected) != 0 ? Palette.Selected : Palette.Input;
             using (SolidBrush brush = new SolidBrush(background)) e.Graphics.FillRectangle(brush, e.Bounds);
-            string text = e.Index >= 0 ? Convert.ToString(combo.Items[e.Index]) : combo.Text;
+            string text = e.Index >= 0 ? combo.GetItemText(combo.Items[e.Index]) : combo.Text;
             TextRenderer.DrawText(e.Graphics, text, combo.Font, e.Bounds, Palette.Text, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
             e.DrawFocusRectangle();
         }
@@ -276,6 +276,7 @@ namespace DriverLoom.UI
         public bool IsHeader;
         public int Rank;
     }
+    public class DriverActionProgress { public int Value; }
     public class DeviceActionCell : DataGridViewButtonCell
     {
         protected override Rectangle GetContentBounds(Graphics graphics, DataGridViewCellStyle style, int rowIndex)
@@ -452,11 +453,17 @@ namespace DriverLoom.UI
             else
             {
                 bool active = Convert.ToString(Rows[e.RowIndex].Cells["Status"].Value) == "UPDATE AVAILABLE";
-                bool link = Convert.ToString(Rows[e.RowIndex].Cells[e.ColumnIndex].Tag) == "Link";
+                DriverActionProgress progress = Rows[e.RowIndex].Cells[e.ColumnIndex].Tag as DriverActionProgress;
+                bool link = progress != null || Convert.ToString(Rows[e.RowIndex].Cells[e.ColumnIndex].Tag) == "Link";
                 Rectangle button = new Rectangle(bounds.X + 10, bounds.Y + (bounds.Height - 32) / 2, Math.Max(1, bounds.Width - 24), 32);
                 using (SolidBrush brush = new SolidBrush(active ? Palette.Primary : Palette.Background)) g.FillRectangle(brush, button);
                 using (Pen pen = new Pen(Palette.Border)) g.DrawRectangle(pen, button);
                 using (Font font = new Font("Consolas", 8.5f, FontStyle.Bold)) TextRenderer.DrawText(g, value.ToUpperInvariant(), font, button, active ? Palette.OnPrimary : link ? Palette.Text : Palette.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+                if(progress != null)
+                {
+                    using(SolidBrush brush=new SolidBrush(Palette.AccentSurface)) g.FillRectangle(brush,button.X,button.Bottom-3,button.Width,3);
+                    using(SolidBrush brush=new SolidBrush(Palette.Accent)) g.FillRectangle(brush,button.X,button.Bottom-3,button.Width*Math.Max(0,Math.Min(100,progress.Value))/100,3);
+                }
             }
             using (Pen line = new Pen(Palette.Border)) g.DrawLine(line, bounds.Left, bounds.Bottom - 1, bounds.Right, bounds.Bottom - 1);
             if ((e.State & DataGridViewElementStates.Selected) != 0 && column == "Device")

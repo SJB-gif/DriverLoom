@@ -1,4 +1,4 @@
-param([switch]$SmokeTest,[switch]$Background)
+﻿param([switch]$SmokeTest,[switch]$Background)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -12,6 +12,7 @@ if($SmokeTest){[Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.F
 . (Join-Path $PSScriptRoot 'AppUpdates.ps1')
 . (Join-Path $PSScriptRoot 'AppDownloads.ps1')
 . (Join-Path $PSScriptRoot 'VendorApps.ps1')
+. (Join-Path $PSScriptRoot 'DriverUI.ps1')
 
 if(!$SmokeTest){
     $setupLock=$null
@@ -81,6 +82,8 @@ $script:driverInstallLock=$null
 $script:appDownload=$null
 $script:appSetupProcess=$null
 $script:packageInstaller=$null
+$script:driverDownload=$null
+$script:backupOperation=$null
 $script:vendorApps=@{}
 if(!$SmokeTest){$script:vendorApps=Get-InstalledVendorApps}
 elseif($env:DRIVERLOOM_TEST_VENDOR_APPS){
@@ -89,14 +92,14 @@ elseif($env:DRIVERLOOM_TEST_VENDOR_APPS){
 }
 
 function Receive-SetupExitRequest {
-    if(!$exitEvent.WaitOne(0) -or $script:installer -or $script:packageInstaller -or ($script:appDownload -and $script:appDownload.Manufacturer)){return $false}
+    if(!$exitEvent.WaitOne(0) -or $script:installer -or $script:driverDownload -or $script:backupOperation -or $script:packageInstaller -or ($script:appDownload -and $script:appDownload.Manufacturer)){return $false}
     $script:exitRequested=$true
     $form.Close()
     return !$form.Visible
 }
 
 function Start-AppUpdateCheck([switch]$Manual) {
-    if($SmokeTest -or $script:appDownload -or $script:appSetupProcess -or $script:packageInstaller){return}
+    if($SmokeTest -or $script:driverDownload -or $script:backupOperation -or $script:appDownload -or $script:appSetupProcess -or $script:packageInstaller){return}
     if($Manual){$script:appUpdateManual=$true}
     if($script:appUpdateJob){return}
     try{
@@ -146,8 +149,8 @@ function Receive-AppDownload {
     catch{if(!$state.Cancelled){$state.Failure=$_.Exception.Message}}
     finally{Remove-Job -Job $job -Force}
     if($state.Cancelled -and $state.Path){
-        if($state.Result.Package.Family -eq 'ASUSDriver'){Remove-AsusRoot $state.Result.Root;if([IO.File]::Exists($state.Result.ArchivePath)){[IO.File]::Delete($state.Result.ArchivePath)}}
-        else{[IO.File]::Delete($state.Path)}
+        if($state.Result.Package.Family -eq 'ASUSDriver'){Remove-AsusRoot $state.Result.Root;if(!$state.PreserveDownload -and [IO.File]::Exists($state.Result.ArchivePath)){[IO.File]::Delete($state.Result.ArchivePath)}}
+        elseif(!$state.PreserveDownload){[IO.File]::Delete($state.Path)}
         $state.Path=''
     }
     $state.Closing=$true;$state.Dialog.Close()
@@ -174,7 +177,7 @@ function Install-AppUpdate($info) {
 }
 
 function Invoke-DownloadDialog($info,[switch]$Manufacturer) {
-    if($SmokeTest -or $script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess){return}
+    if($SmokeTest -or $script:driverDownload -or $script:backupOperation -or $script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess){return}
     $dialog=$null;$result=$null;$failure=''
     try{
         if($Manufacturer){if(!(Test-ManagedPackageOffer $info.Device $info.Check)){throw 'This device has no verified managed package.'}}
@@ -206,24 +209,7 @@ function Invoke-DownloadDialog($info,[switch]$Manufacturer) {
 }
 
 function Install-ManufacturerUpdate($selection) {
-    if($SmokeTest -or $script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess){return}
-    $result=$null
-    try{
-        $setupLock=$null
-        if([Threading.Mutex]::TryOpenExisting('Local\DriverLoom.Setup',[ref]$setupLock)){$setupLock.Dispose();throw 'Finish DriverLoom setup before starting a manufacturer update.'}
-        $script:driverInstallLock=[Threading.Mutex]::new($false,'Local\DriverLoom.DriverInstall')
-        $result=Invoke-DownloadDialog $selection -Manufacturer
-        if(!$result){return}
-        $script:packageInstaller=Start-ManagedPackage $result
-        $script:fresh=$false;Update-Controls
-        Show-PackageInstallation $selection
-    }catch{Show-Message ('The manufacturer update could not be completed. '+$_.Exception.Message+"`r`nRefresh the hardware list to try again.")}
-    finally{
-        if($script:packageInstaller){$script:packageInstaller.Dispose();$script:packageInstaller=$null}
-        if($script:driverInstallLock){$script:driverInstallLock.Dispose();$script:driverInstallLock=$null}
-        Update-Controls
-    }
-    Start-Scan
+    if($selection.Ready){Install-SavedManufacturerDriver $selection.Ready}else{Download-ManufacturerUpdate $selection}
 }
 
 function Show-PackageInstallation($selection,[switch]$Preview) {
@@ -252,7 +238,7 @@ function Receive-AppUpdateCheck {
         elseif($info.UpdateAvailable){$script:appUpdateInfo=$info;if($manual){$script:lastNotifiedAppTag=''}}
         else{$script:appUpdateInfo=$null;if($manual){Show-Message ('No newer published DriverLoom release is available.'+"`r`n`r`nInstalled: "+$info.CurrentVersion+"`r`nLatest published: "+$info.LatestVersion)}}
     }
-    if($script:appUpdateInfo -and $script:appUpdateInfo.Tag -ne $script:lastNotifiedAppTag -and !$script:showingAppUpdate -and !$script:job -and !$script:installer -and !$script:packageInstaller -and !$script:appDownload -and !$script:appSetupProcess -and !$script:settingsWindow -and $form.Visible -and $form.Enabled){
+    if($script:appUpdateInfo -and $script:appUpdateInfo.Tag -ne $script:lastNotifiedAppTag -and !$script:showingAppUpdate -and !$script:driverDownload -and !$script:backupOperation -and !$script:job -and !$script:installer -and !$script:packageInstaller -and !$script:appDownload -and !$script:appSetupProcess -and !$script:settingsWindow -and $form.Visible -and $form.Enabled){
         $script:lastNotifiedAppTag=$script:appUpdateInfo.Tag;$script:showingAppUpdate=$true
         try{Show-AppUpdateNotice $script:appUpdateInfo}finally{$script:showingAppUpdate=$false}
     }
@@ -277,13 +263,13 @@ function Invoke-ScheduledCheck {
     $now=[DateTimeOffset]::UtcNow
     if($now -lt $script:nextSchedulePoll){return}
     $script:nextSchedulePoll=$now.AddMinutes(1)
-    if($script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess){return}
+    if($script:driverDownload -or $script:backupOperation -or $script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess){return}
     if(Test-AutomaticCheckDue $script:settings.CheckFrequency $now $script:lastScanAttempt $script:snapshot.CapturedAt){Start-Scan}
 }
 
 function Handle-AppClosing($eventArgs) {
     if($eventArgs.CloseReason -ne [Windows.Forms.CloseReason]::UserClosing){return}
-    if($script:installer -or $script:packageInstaller -or ($script:appDownload -and $script:appDownload.Manufacturer)){$eventArgs.Cancel=$true;$script:exitRequested=$false;return}
+    if($script:installer -or $script:driverDownload -or $script:backupOperation -or $script:packageInstaller -or ($script:appDownload -and $script:appDownload.Manufacturer)){$eventArgs.Cancel=$true;$script:exitRequested=$false;return}
     if(!(Close-SettingsWindow)){$eventArgs.Cancel=$true;return}
     if($script:settings.KeepRunningInTray -and !$script:exitRequested){$eventArgs.Cancel=$true;$form.Hide()}
 }
@@ -378,6 +364,7 @@ function Refresh-View {
     $hiddenWindows = 0
     $unsupported = [System.Collections.Generic.List[object]]::new()
     $entries=[System.Collections.Generic.List[object]]::new()
+    $library=@(Get-DriverLibrary)
     foreach ($row in $orderedInventory) {
         if (!$row -or ($row.Kind -eq 'BIOS' -and !$script:settings.Bios)) { continue }
         $check = $checks["$($row.Key)|$($row.Current)"]
@@ -400,8 +387,9 @@ function Refresh-View {
         $manager=if($mode -eq 'Unsupported'){$method.Name}else{''}
         $launcher=Get-DeviceLauncher $row $script:vendorApps
         if($launcher){$action='Open '+$launcher.Name}
-        if(Test-ManagedPackageOffer $row $check){$action='Download & install'}
-        $entries.Add([pscustomobject]@{Name=$name;Device=$row;Url=$check.Url;Check=$check;Launcher=$launcher;DisplayStatus=Get-DisplayStatus $check.Status $manager;Manager=$manager;Action=$action})
+        $ready=Get-ReadyDriver $row $check $library
+        if(Test-ManagedPackageOffer $row $check){$action=if($ready){'Install update'}else{'Download update'}}
+        $entries.Add([pscustomobject]@{Name=$name;Device=$row;Url=$check.Url;Check=$check;Launcher=$launcher;DisplayStatus=Get-DisplayStatus $check.Status $manager;Manager=$manager;Action=$action;Ready=$ready})
     }
     foreach($first in $entries){
             $i=$hardware.Rows.Add(@($first.Name,$first.Device.Current,$first.Check.Available,$first.DisplayStatus,$first.Action))
@@ -441,6 +429,7 @@ function Refresh-View {
             $info=[DriverLoom.UI.HardwareCategoryInfo]::new();$info.Name=$category;$info.Rank=$rank;$info.IsHeader=$true;$headerRow.HeaderCell.Tag=$info
         }
     $hardware.ApplyHardwareSort()
+    Update-DriverDownloadButton
     Update-Footer
 
 
@@ -646,6 +635,12 @@ function Edit-Settings([switch]$Preview) {
     $catalogLabel=[Windows.Forms.Label]::new();$catalogLabel.Text='Optional public GitHub catalog (owner/repository)';$catalogLabel.SetBounds(18,46,404,26);$advanced.Controls.Add($catalogLabel)
     $repoBox=[Windows.Forms.TextBox]::new();$repoBox.Text=$script:settings.Repo;$repoBox.SetBounds(18,78,404,29);$advanced.Controls.Add($repoBox)
     $editButton=New-Button 'Edit selected device source';$editButton.SetBounds(18,122,404,34);$editButton.Enabled=[bool](Get-SelectedRow);$editButton.Add_Click({$selected=Get-SelectedRow;if(Close-SettingsWindow){Edit-Source $selected}});$advanced.Controls.Add($editButton)
+    $body.AutoScrollMinSize=[Drawing.Size]::new(0,710)
+    $backups=Add-SettingsCard $body 'DRIVER BACKUPS' 24 562 892 126
+    $backupText=[Windows.Forms.Label]::new();$backupText.Text='Keep the original backup, a previous version and the latest download per device.';$backupText.Tag='Muted';$backupText.SetBounds(18,43,850,26);$backups.Controls.Add($backupText)
+    $backupButton=New-Button 'Back up installed drivers';$backupButton.SetBounds(18,78,420,32);$backups.Controls.Add($backupButton)
+    $backupButton.Add_Click({if(Close-SettingsWindow){try{$result=Invoke-BackupOperation;if($result){Show-Message ("Saved $($result.Saved) of $($result.Total) third-party driver packages."+$(if(@($result.Errors).Count){"`r`n"+($result.Errors -join "`r`n")}else{''}))}}catch{Show-Message ('Backup could not be completed. '+$_.Exception.Message)}}})
+    $rollbackButton=New-Button 'Rollback';$rollbackButton.SetBounds(454,78,420,32);$backups.Controls.Add($rollbackButton);$rollbackButton.Add_Click({if(Close-SettingsWindow){Show-DriverLibrary}})
     $aboutButton=New-Button 'About';$aboutButton.SetBounds(24,($dialog.ClientSize.Height-50),80,34);$aboutButton.Add_Click({if(Close-SettingsWindow){Show-About}})
     $helpButton=New-Button 'Help';$helpButton.SetBounds(116,($dialog.ClientSize.Height-50),80,34);$helpButton.Add_Click({if(Close-SettingsWindow){Show-Help}})
     $footer=[Windows.Forms.Label]::new();$footer.Text='Click on the main window to save and return. Esc also works.';$footer.Tag='Muted';$footer.SetBounds(216,($dialog.ClientSize.Height-50),700,36);$footer.TextAlign='MiddleLeft'
@@ -662,7 +657,7 @@ function Edit-Settings([switch]$Preview) {
         }
     })
     $dialog.Add_FormClosed({param($sender,$eventArgs)$script:settingsWindow=$null;$sender.Dispose()})
-    if($Preview){$dialog.Add_Shown({param($sender,$eventArgs)Save-FormPreview $sender 'settings';$sender.Tag.Body.AutoScrollPosition=[Drawing.Point]::new(0,200);Save-FormPreview $sender 'settings-scrolled';$sender.Close()})}
+    if($Preview){$dialog.Add_Shown({param($sender,$eventArgs)Save-FormPreview $sender 'settings';$sender.Tag.Body.AutoScrollPosition=[Drawing.Point]::new(0,200);Save-FormPreview $sender 'settings-scrolled';$sender.Tag.Body.AutoScrollPosition=[Drawing.Point]::new(0,600);Save-FormPreview $sender 'settings-backups';$sender.Close()})}
     $script:settingsWindow=$dialog
     $dialog.Show($form)
 }
@@ -749,7 +744,7 @@ function Show-BiosGuide {
 }
 
 function Start-Scan {
-    if ($script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess) { return }
+    if ($script:driverDownload -or $script:backupOperation -or $script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess) { return }
     if(!$SmokeTest){$script:vendorApps=Get-InstalledVendorApps}
     $script:lastScanAttempt=[DateTimeOffset]::UtcNow.ToString('o')
     $script:fresh = $false
@@ -768,23 +763,23 @@ function Start-Scan {
 
 function Update-Footer {
     $caption=Get-CheckCaption $script:snapshot.CapturedAt
-    $state=if($script:appDownload){if($script:appDownload.Manufacturer){'DOWNLOADING DRIVER PACKAGE'}else{'DOWNLOADING DRIVERLOOM'}}elseif($script:appSetupProcess){'DRIVERLOOM SETUP OPEN'}elseif($script:job){'CHECKING'}elseif($script:packageInstaller){'VENDOR SETUP OPEN'}elseif($script:installer){'UPDATING'}elseif($script:lastScanError){'CHECK FAILED - USE REFRESH'}else{$caption}
+    $state=if($script:driverDownload){'DOWNLOADING DRIVER  '+$script:driverDownload.Percent+'%'}elseif($script:backupOperation){'DRIVER BACKUP / RESTORE'}elseif($script:appDownload){if($script:appDownload.Manufacturer){'DOWNLOADING DRIVER PACKAGE'}else{'DOWNLOADING DRIVERLOOM'}}elseif($script:appSetupProcess){'DRIVERLOOM SETUP OPEN'}elseif($script:job){'CHECKING'}elseif($script:packageInstaller){'VENDOR SETUP OPEN'}elseif($script:installer){'UPDATING'}elseif($script:lastScanError){'CHECK FAILED - USE REFRESH'}else{$caption}
     $status.Text=$state+'  '+[char]0x00B7+'  USING WINDOWS UPDATE & MANUFACTURER SOURCES'
     $tooltips.SetToolTip($status,($script:lastScanError+(@($script:snapshot.Warnings)-join "`r`n")))
     if($repoButton){$repoButton.Image=if([DriverLoom.UI.Palette]::Dark){$githubLight}else{$githubDark}}
 }
 
 function Update-Controls {
-    $busy = $null -ne $script:job -or $null -ne $script:installer -or $null -ne $script:packageInstaller -or $null -ne $script:appDownload -or $null -ne $script:appSetupProcess
+    $busy = $null -ne $script:driverDownload -or $null -ne $script:backupOperation -or $null -ne $script:job -or $null -ne $script:installer -or $null -ne $script:packageInstaller -or $null -ne $script:appDownload -or $null -ne $script:appSetupProcess
     $action=Get-UpdateAction $script:snapshot $script:fresh $busy
     $primary.Visible=$action.Visible -or $null -ne $script:installer
     $primary.Enabled=$action.Enabled
     $primary.Text=if($script:installer){'Updating...'}else{'Update All'}
-    $hardware.Enabled=!$busy
+    $hardware.Enabled=!$busy -or $null -ne $script:driverDownload
     $refresh.Enabled=!$busy
     $settingsMenu.Enabled=!$busy
     $trayCheck.Enabled=!$busy
-    $trayExit.Enabled=$null -eq $script:installer -and $null -eq $script:packageInstaller
+    $trayExit.Enabled=$null -eq $script:installer -and $null -eq $script:packageInstaller -and $null -eq $script:driverDownload -and $null -eq $script:backupOperation
     Update-Footer
 }
 
@@ -804,10 +799,11 @@ function Show-UpdateReview([switch]$Preview) {
         $launcher=Get-DeviceLauncher $device $script:vendorApps
         $action=if($launcher){'Open '+$launcher.Name}else{'Review update'}
         $managed=Test-ManagedPackageOffer $device $check
-        if($managed){$action='Download & install'}
+        $ready=$null
+        if($managed){$ready=Get-ReadyDriver $device $check;$action=if($ready){'Install update'}else{'Download update'}}
         $method=if($managed){'Verified download / vendor setup'}else{'Vendor app or website'}
         $i=$grid.Rows.Add(@($device.Model,$check.Available,$method,$action))
-        $grid.Rows[$i].Tag=[pscustomobject]@{Device=$device;Launcher=$launcher;Url=$check.Url;Check=$check}
+        $grid.Rows[$i].Tag=[pscustomobject]@{Device=$device;Launcher=$launcher;Url=$check.Url;Check=$check;Ready=$ready}
     }
     foreach($offer in @($script:snapshot.Offers|Where-Object{$_})){
         [void]$grid.Rows.Add(@($offer.Title,'','Install through Windows Update','In update queue'))
@@ -829,6 +825,8 @@ function Show-UpdateReview([switch]$Preview) {
 }
 
 function Open-HardwareAction($selection) {
+    if($script:driverDownload){if($selection.Device.Key -ceq $script:driverDownload.Key){Cancel-DriverDownload};return}
+    if($script:backupOperation){return}
     if($script:appDownload -or $script:appSetupProcess -or $script:packageInstaller){return}
     if(Test-ManagedPackageOffer $selection.Device $selection.Check){Install-ManufacturerUpdate $selection}
     elseif($selection.Launcher){
@@ -873,11 +871,11 @@ function Show-About {
 }
 
 function Show-Help {
-    Show-Message "Checks default to On opening. Choose Manual, Daily or Weekly in Settings, or use the refresh arrow at any time. Scheduled checks run only while DriverLoom is open or kept in the tray.`r`n`r`nTray mode and Start with Windows are off by default. When tray mode is enabled, closing hides the window; use the tray menu to open it or exit.`r`n`r`nUpdate All opens a review list. Eligible Windows Update drivers require confirmation; supported manufacturer packages download here and open their signed vendor installer. Other devices use the indicated app or official website. Double-click a device for source details. Firmware flashing and reboots are never automatic."
+    Show-Message "Checks default to On opening. Choose Manual, Daily or Weekly in Settings, or use the refresh arrow at any time. Scheduled checks run only while DriverLoom is open or kept in the tray.`r`n`r`nTray mode and Start with Windows are off by default. When tray mode is enabled, closing hides the window; use the tray menu to open it or exit.`r`n`r`nUpdate All opens a review list. Eligible Windows Update drivers require confirmation; supported manufacturer packages use Download update, then Install update on a separate click. Driver backups and saved-version rollback are in Settings. Other devices use the indicated app or official website. Double-click a device for source details. Firmware flashing and reboots are never automatic."
 }
 
 function Start-DriverInstallation {
-    if (!(Test-CanInstallSnapshot $script:snapshot $script:fresh ($script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess))) { return }
+    if (!(Test-CanInstallSnapshot $script:snapshot $script:fresh ($script:driverDownload -or $script:backupOperation -or $script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess))) { return }
     $offers = @($script:snapshot.Offers)
     if (!$offers.Count) { return }
     $answer = [Windows.Forms.MessageBox]::Show($form,
@@ -968,12 +966,15 @@ $hardware.Add_CellMouseDown({param($sender,$eventArgs)if($eventArgs.Button -eq '
 $hardwareContext=[Windows.Forms.ContextMenuStrip]::new();$hardwareContext.Renderer=[DriverLoom.UI.MenuRenderer]::new()
 $deviceDetailsItem=[Windows.Forms.ToolStripMenuItem]::new('Device details');$deviceDetailsItem.Add_Click({Show-DeviceDetails})
 $officialItem=[Windows.Forms.ToolStripMenuItem]::new('Official website');$officialItem.Add_Click({if($hardware.SelectedRows.Count){$selected=$hardware.SelectedRows[0].Tag;if($selected.IsGroup){Show-LauncherGroup $selected}elseif($selected.Url){Open-Link $selected.Url}}})
+$downloadAgain=[Windows.Forms.ToolStripMenuItem]::new('Download update again');$downloadAgain.Add_Click({if($hardware.SelectedRows.Count){Download-ManufacturerUpdate $hardware.SelectedRows[0].Tag}})
+$hardwareContext.Add_Opening({$selected=if($hardware.SelectedRows.Count){$hardware.SelectedRows[0].Tag}else{$null};$downloadAgain.Enabled=!$script:driverDownload -and !$script:backupOperation -and (Test-ManagedPackageOffer $selected.Device $selected.Check)})
 $hardwareContext.Add_Opening({param($sender,$eventArgs)$selected=if($hardware.SelectedRows.Count){$hardware.SelectedRows[0].Tag}else{$null};$deviceDetailsItem.Enabled=[bool]($selected.Device -or $selected.IsGroup);$officialItem.Enabled=[bool]($selected.Url -or $selected.IsGroup)})
-[void]$hardwareContext.Items.Add($deviceDetailsItem);[void]$hardwareContext.Items.Add($officialItem);$hardware.ContextMenuStrip=$hardwareContext
+[void]$hardwareContext.Items.Add($deviceDetailsItem);[void]$hardwareContext.Items.Add($officialItem);[void]$hardwareContext.Items.Add($downloadAgain);$hardware.ContextMenuStrip=$hardwareContext
 
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({
+    Receive-DriverDownload
     Receive-AppDownload
     if($script:appSetupProcess -and $script:appSetupProcess.HasExited){$script:appSetupProcess.Dispose();$script:appSetupProcess=$null;Update-Controls}
     if(Receive-SetupExitRequest){return}
@@ -1013,6 +1014,7 @@ $form.Add_Shown({
             Edit-Settings -Preview
             Show-UnsupportedItems -Preview
             Show-WindowsExclusions -Preview
+            Show-DriverLibrary -Preview
             $group=$hardware.Rows|Where-Object{$_.Tag.IsGroup}|Select-Object -First 1
             if($group){Show-LauncherGroup $group.Tag -Preview}
             Show-AppUpdateNotice ([pscustomobject]@{CurrentVersion=$script:LauncherVersion;LatestVersion='0.2.0';ReleaseUrl='https://github.com/SJB-gif/DriverLoom/releases';InstallerUrl=''}) -Preview
@@ -1023,10 +1025,9 @@ $form.Add_Shown({
             $managedRow=$hardware.Rows|Where-Object{Test-ManagedPackageOffer $_.Tag.Device $_.Tag.Check}|Select-Object -First 1
             if($managedRow){
                 $previewSelection=$managedRow.Tag
-                $packagePreview=New-AppDownloadDialog $previewSelection -Manufacturer
-                $packagePreview.Tag.Progress.Value=64;$packagePreview.Tag.Label.Text='64%  Downloading from the official manufacturer'
-                $packagePreview.Add_Shown({param($sender,$eventArgs)Save-FormPreview $sender 'manufacturer-download';$sender.Close()})
-                try{[void]$packagePreview.ShowDialog($form)}finally{$packagePreview.Dispose()}
+                $script:driverDownload=[pscustomobject]@{Key=$previewSelection.Device.Key;Percent=64;Message='64% downloaded';Cancelled=$false}
+                Update-DriverDownloadButton;Save-FormPreview $form 'driver-download'
+                $script:driverDownload=$null;Refresh-View
                 Show-PackageInstallation $previewSelection -Preview
             }
         }

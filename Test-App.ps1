@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Engine.ps1')
 $powerShell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('hardware-launcher-ui-' + [guid]::NewGuid().ToString('N'))
@@ -182,7 +182,7 @@ try {
     $managedSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($managedDevice);Offers=@();ExcludedOffers=@();Warnings=@();Checks=@([pscustomobject]@{Key=$managedDevice.Key;Current=$managedDevice.Current;Available=$managedPackage.Version;Checked=$true;Status='Newer at source';Url=$managedPackage.SourceUrl;Package=$managedPackage})}
     $managedApps=@{amdManager=[pscustomobject]@{Key='amdManager';Name='AMD Install Manager';Vendor='AMD';Path='C:\Fixtures\AMDInstallManager.exe'}}
     $managed=Invoke-StartupCase 'managed-package' $managedSnapshot $false '' $false @{GroupBy='Application'} -VendorApps $managedApps
-    Assert-Startup 'Download & install' $managed.MainItems[0].Action 'verified newer package takes priority over its installed vendor app'
+    Assert-Startup 'Download update' $managed.MainItems[0].Action 'verified newer package takes priority over its installed vendor app'
     Assert-Startup 'System & chipset' $managed.HardwareCategories[0] 'legacy application grouping preference is ignored'
     $radeon=New-HardwareRow 'GPU driver' 'AMD' 'AMD Radeon(TM) Graphics' '' '' '32.0.21030.2001' @()
     $software=New-HardwareRow 'GPU software' 'AMD' 'AMD Software: Adrenalin Edition' '' '' '24.6.1' @()
@@ -193,8 +193,8 @@ try {
         [pscustomobject]@{Key=$radeon.Key;Current=$radeon.Current;Available=$package.Version;Checked=$true;Status='Vendor package found; compare the AMD Software row';Url=$source}
     )}
     $radeonView=Invoke-StartupCase 'managed-radeon' $radeonSnapshot $false '' $false -VendorApps $managedApps
-    Assert-Startup 1 @($radeonView.MainItems|Where-Object Action -eq 'Download & install').Count 'Radeon offers one download on the comparable software row'
-    Assert-Startup 'Download & install' ($radeonView.MainItems|Where-Object Device -eq $software.Model).Action 'Radeon package download takes priority over installed AMD updater'
+    Assert-Startup 1 @($radeonView.MainItems|Where-Object Action -eq 'Download update').Count 'Radeon offers one download on the comparable software row'
+    Assert-Startup 'Download update' ($radeonView.MainItems|Where-Object Device -eq $software.Model).Action 'Radeon package download takes priority over installed AMD updater'
     Assert-Startup 'CHECK UNAVAILABLE' ($radeonView.MainItems|Where-Object Device -eq $radeon.Model).Status 'display-driver version is not compared with an Adrenalin package version'
     $board=New-HardwareRow 'Motherboard' 'ASUSTeK' 'ROG STRIX X670E-A GAMING WIFI' '' '' '' @()
     $asusDevices=@(
@@ -210,7 +210,7 @@ try {
     })
     $asusSnapshot=[pscustomobject]@{CapturedAt=$snapshot.CapturedAt;Inventory=@($board)+$asusDevices;Checks=$asusChecks;Offers=@();ExcludedOffers=@();Warnings=@()}
     $asusView=Invoke-StartupCase 'managed-asus' $asusSnapshot $false
-    Assert-Startup 4 @($asusView.MainItems|Where-Object Action -eq 'Download & install').Count 'all four ASUS driver categories expose managed download actions'
+    Assert-Startup 4 @($asusView.MainItems|Where-Object Action -eq 'Download update').Count 'all four ASUS driver categories expose managed download actions'
 
     $env:LOCALAPPDATA = Join-Path $testRoot 'failure'
     $broken = Join-Path $testRoot 'broken-payload'
