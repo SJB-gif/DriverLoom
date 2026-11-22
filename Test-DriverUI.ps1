@@ -64,16 +64,32 @@ try{
     function Assert-LibraryDevice($entry,$data){return $device}
     function Get-HardwareInventory {[pscustomobject]@{OS='10.0.26300.0';Inventory=@()}}
     function Invoke-BackupOperation {param($operation,$entry,$keys,[switch]$DeferRetention)$script:backupCalls++;return [pscustomobject]@{Saved=1;Total=1;Cancelled=$false;Errors=@()}}
-    function Invoke-SavedDriverPreparation($entry){return [pscustomobject]@{Path='C:\Fixture\AMD-Setup.exe';Package=$package}}
+    function Invoke-SavedDriverPreparation($entry){if($script:cancelPreparation){return $null};if($script:preparationFailure){throw 'Fixture saved-file verification failed.'};return [pscustomobject]@{Path='C:\Fixture\AMD-Setup.exe';Package=$package}}
     function Start-ManagedPackage($result){$script:setupCalls++;$p=[pscustomobject]@{HasExited=$true};$p|Add-Member ScriptMethod Dispose {};return $p}
     function Show-PackageInstallation($selection){$script:handoffCalls++;$lock=$null;Assert-DriverUI $true ([Threading.Mutex]::TryOpenExisting('Local\DriverLoom.DriverInstall',[ref]$lock)) 'setup handoff keeps the installation guard';$lock.Dispose()}
     function Start-Scan {$script:scanCalls++}
     $script:backupCalls=0;$script:setupCalls=0;$script:handoffCalls=0;$script:scanCalls=0
     & $realInstall ([pscustomobject]@{Folder=(Join-Path $root 'fixture')})
-    Assert-DriverUI 1 $script:backupCalls 'explicit installation backs up current drivers first'
+    Assert-DriverUI 0 $script:backupCalls 'opening vendor setup never starts a backup'
     Assert-DriverUI 1 $script:setupCalls 'only explicit installation opens vendor setup'
-    Assert-DriverUI 1 $script:handoffCalls 'user completes the vendor handoff'
-    Assert-DriverUI 1 $script:scanCalls 'installation triggers a fresh check'
+    Assert-DriverUI 0 $script:handoffCalls 'opening vendor setup never opens an in-app installation dialog'
+    Assert-DriverUI 0 $script:scanCalls 'opening vendor setup is not treated as completed installation'
+    Assert-DriverUI $true ([bool]$script:packageInstaller) 'external process guard remains until the vendor exits'
+    Receive-VendorSetupExit
+    Assert-DriverUI $null $script:packageInstaller 'vendor process exit releases the external process handle'
+    Assert-DriverUI $null $script:driverInstallLock 'vendor process exit releases the update guard'
+    Assert-DriverUI 0 $script:scanCalls 'vendor exit does not claim success or force a scan'
+    $unavailable=[pscustomobject]@{};$unavailable|Add-Member ScriptProperty HasExited {throw 'Fixture process is unavailable.'};$unavailable|Add-Member ScriptMethod Dispose {}
+    $script:packageInstaller=$unavailable;Receive-VendorSetupExit
+    Assert-DriverUI $null $script:packageInstaller 'unavailable vendor handle never crashes the app'
+    $script:cancelPreparation=$true
+    & $realInstall ([pscustomobject]@{Folder=(Join-Path $root 'fixture')})
+    Assert-DriverUI 1 $script:setupCalls 'cancelled verification never opens setup'
+    Assert-DriverUI $null $script:driverInstallLock 'cancelled verification releases guard'
+    $script:cancelPreparation=$false;$script:preparationFailure=$true
+    & $realInstall ([pscustomobject]@{Folder=(Join-Path $root 'fixture')})
+    Assert-DriverUI 1 $script:setupCalls 'failed verification never opens setup'
+    Assert-DriverUI $true ($script:failure -like '*saved-file verification failed*') 'failed preparation reports its cause'
     'Driver action UI checks passed: explicit download, button progress, cancellation/failure, no automatic install and second-click install dispatch. No installer was executed.'
 }finally{
     if($script:driverDownload -and $script:driverDownload.Job){Remove-Job -Job $script:driverDownload.Job -Force}

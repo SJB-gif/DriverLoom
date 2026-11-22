@@ -30,6 +30,8 @@ try{
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dist\host\DriverLoom.exe') -Destination $exe
     $env:LOCALAPPDATA=Join-Path $testRoot 'state'
     $result=(Invoke-NativeTest $exe @('-SmokeTest'))|ConvertFrom-Json
+    $reported=[version]$result.ReportedWindowsVersion;$expected=[Environment]::OSVersion.Version
+    if($reported.Major -ne $expected.Major -or $reported.Minor -ne $expected.Minor -or $reported.Build -ne $expected.Build -or $result.WindowsDriverFamily -cne (Get-WindowsDriverTarget $expected.ToString()).Family){throw 'The native launcher misreported Windows and would reject saved installer launches.'}
     if($result.NativeProcess -ne 'DriverLoom' -or $result.NativeAppID -ne 'SJB.DriverLoom' -or !$result.Is64BitProcess -or $result.ApartmentState -ne 'STA' -or !$result.Visible){throw 'Native application identity, bitness or startup failed.'}
     if($result.TaskbarWindowID -ne 'SJB.DriverLoom' -or $result.TaskbarIcon -ne ((Join-Path $stage 'assets\DriverLoom-loops.ico')+',0') -or $result.TaskbarCommand -ne ('"'+$exe+'"') -or $result.TaskbarName -ne 'DriverLoom'){throw 'Taskbar window icon or relaunch metadata was not applied.'}
     $state=Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'

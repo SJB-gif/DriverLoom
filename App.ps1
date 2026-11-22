@@ -269,7 +269,7 @@ function Invoke-ScheduledCheck {
 
 function Handle-AppClosing($eventArgs) {
     if($eventArgs.CloseReason -ne [Windows.Forms.CloseReason]::UserClosing){return}
-    if($script:installer -or $script:driverDownload -or $script:backupOperation -or $script:packageInstaller -or ($script:appDownload -and $script:appDownload.Manufacturer)){$eventArgs.Cancel=$true;$script:exitRequested=$false;return}
+    if($script:installer -or $script:driverDownload -or $script:backupOperation -or ($script:appDownload -and $script:appDownload.Manufacturer)){$eventArgs.Cancel=$true;$script:exitRequested=$false;return}
     if(!(Close-SettingsWindow)){$eventArgs.Cancel=$true;return}
     if($script:settings.KeepRunningInTray -and !$script:exitRequested){$eventArgs.Cancel=$true;$form.Hide()}
 }
@@ -779,7 +779,7 @@ function Update-Controls {
     $refresh.Enabled=!$busy
     $settingsMenu.Enabled=!$busy
     $trayCheck.Enabled=!$busy
-    $trayExit.Enabled=$null -eq $script:installer -and $null -eq $script:packageInstaller -and $null -eq $script:driverDownload -and $null -eq $script:backupOperation
+    $trayExit.Enabled=$null -eq $script:installer -and $null -eq $script:driverDownload -and $null -eq $script:backupOperation
     Update-Footer
 }
 
@@ -974,6 +974,7 @@ $hardwareContext.Add_Opening({param($sender,$eventArgs)$selected=if($hardware.Se
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 500
 $timer.Add_Tick({
+    Receive-VendorSetupExit
     Receive-DriverDownload
     Receive-AppDownload
     if($script:appSetupProcess -and $script:appSetupProcess.HasExited){$script:appSetupProcess.Dispose();$script:appSetupProcess=$null;Update-Controls}
@@ -1033,6 +1034,8 @@ $form.Add_Shown({
         }
         $script:smokeResult = [pscustomobject]@{
             Version = $script:LauncherVersion
+            ReportedWindowsVersion = [Environment]::OSVersion.Version.ToString()
+            WindowsDriverFamily = (Get-WindowsDriverTarget ([Environment]::OSVersion.Version.ToString())).Family
             Visible = $form.Visible
             HardwareRows = @($hardware.Rows|Where-Object{!$_.Tag.IsCategory}).Count
             DriverRows = @($script:snapshot.Offers | Where-Object { $_ }).Count

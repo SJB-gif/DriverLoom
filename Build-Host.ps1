@@ -4,7 +4,7 @@ $output=Join-Path $PSScriptRoot 'dist\host\DriverLoom.exe'
 $compiler=[Microsoft.CSharp.CSharpCodeProvider]::new()
 $options=[CodeDom.Compiler.CompilerParameters]::new()
 $options.GenerateExecutable=$true;$options.GenerateInMemory=$false;$options.OutputAssembly=$output
-$options.CompilerOptions='/target:winexe /platform:x64 /optimize+ /win32icon:"'+(Join-Path $PSScriptRoot 'assets\DriverLoom-loops.ico')+'"'
+$options.CompilerOptions='/target:winexe /platform:x64 /optimize+ /win32icon:"'+(Join-Path $PSScriptRoot 'assets\DriverLoom-loops.ico')+'" /win32manifest:"'+(Join-Path $PSScriptRoot 'Host.manifest')+'"'
 foreach($assembly in @('System.dll','System.Core.dll','System.Windows.Forms.dll',([System.Management.Automation.PowerShell].Assembly.Location))){[void]$options.ReferencedAssemblies.Add($assembly)}
 try{
     $result=$compiler.CompileAssemblyFromFile($options,(Join-Path $PSScriptRoot 'Host.cs'))

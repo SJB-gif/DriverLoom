@@ -142,30 +142,32 @@ function Show-DriverLibrary([switch]$Preview) {
 }
 function Install-SavedManufacturerDriver($entry) {
     if($SmokeTest -or $script:driverDownload -or $script:backupOperation -or $script:job -or $script:installer -or $script:packageInstaller -or $script:appDownload -or $script:appSetupProcess){return}
-    $result=$null;$keys=@()
+    $result=$null;$opened=$false
     try{
         $entry=Read-DriverLibraryEntry $entry.Folder
         $device=Assert-LibraryDevice $entry (Get-HardwareInventory)
-        $keys=@($device.Key)
-        if($entry.Package.Family -eq 'AMDRadeon'){$keys=@($entry.Package.GpuKey)}
-        if($entry.Package.Family -eq 'AMDChipset'){$keys=@((Get-HardwareInventory).Inventory|Where-Object{$_.Kind -eq 'Chipset/system driver' -and (Get-HardwareVendor $_) -eq 'AMD'}|ForEach-Object Key)}
-        if(!$keys.Count){$keys=@('__no_exportable_component__')}
-        $backup=Invoke-BackupOperation 'Backup' $null $keys -DeferRetention
-        if(!$backup -or $backup.Cancelled){return}
-        if(@($backup.Errors).Count -and [Windows.Forms.MessageBox]::Show('The current driver could not be fully backed up. Continue without a complete rollback backup?','Driver backup','OKCancel','Warning') -ne 'OK'){return}
+        $setup=$null
+        if([Threading.Mutex]::TryOpenExisting('Local\DriverLoom.Setup',[ref]$setup)){$setup.Dispose();throw 'Finish DriverLoom setup before opening the vendor installer.'}
         $script:driverInstallLock=[Threading.Mutex]::new($false,'Local\DriverLoom.DriverInstall')
         $result=Invoke-SavedDriverPreparation $entry
         if(!$result){return}
-        $script:packageInstaller=Start-ManagedPackage $result;$script:fresh=$false;Update-Controls
-        Show-PackageInstallation ([pscustomobject]@{Device=$device})
+        $script:packageInstaller=Start-ManagedPackage $result
+        $opened=$true;$script:fresh=$false
     }catch{Show-Message ('Could not open the saved installer. '+$_.Exception.Message)}
     finally{
-        if($script:packageInstaller){$script:packageInstaller.Dispose();$script:packageInstaller=$null}
-        if($script:driverInstallLock){$script:driverInstallLock.Dispose();$script:driverInstallLock=$null}
-        foreach($key in @($entry.DeviceKey)+$keys|Where-Object{$_ -and $_ -ne '__no_exportable_component__'}|Select-Object -Unique){Limit-DriverLibrary $key}
+        # Keep only the external process guard; setup has its own UI and permissions.
+        if(!$opened -and $script:driverInstallLock){$script:driverInstallLock.Dispose();$script:driverInstallLock=$null}
         Refresh-View;Update-Controls
     }
-    Start-Scan
+}
+function Receive-VendorSetupExit {
+    if(!$script:packageInstaller){return}
+    try{$value=$script:packageInstaller.HasExited;$exited=$value -isnot [bool] -or $value}catch{$exited=$true}
+    if(!$exited){return}
+    $script:packageInstaller.Dispose();$script:packageInstaller=$null
+    if($script:driverInstallLock){$script:driverInstallLock.Dispose();$script:driverInstallLock=$null}
+    # Process exit is not installation success; use normal refresh to read versions again.
+    Update-Controls
 }
 function Invoke-SavedDriverPreparation($entry) {
     $dialog=New-Dialog 'Preparing saved driver' 286
