@@ -37,12 +37,18 @@ function Get-AsusArchivePath([string]$root,[string]$name) {
 function Assert-AsusRoot([string]$root) {
     $root=[IO.Path]::GetFullPath($root)
     $prefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\'
-    if(!$root.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($root) -cnotmatch '^DriverLoom-ASUS-[a-f0-9]{32}$' -or ((Test-Path -LiteralPath $root) -and ((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint))){throw 'The ASUS extraction folder is invalid.'}
+    $temporary=$root.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($root) -cmatch '^DriverLoom-ASUS-[a-f0-9]{32}$'
+    $persistent=Test-PersistentAsusRoot $root
+    if((!$temporary -and !$persistent) -or ((Test-Path -LiteralPath $root) -and ((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint))){throw 'The ASUS extraction folder is invalid.'}
+}
+function Test-PersistentAsusRoot([string]$root) {
+    if([IO.Path]::GetFileName($root) -cnotmatch '^setup-[a-f0-9]{8}$' -or !(Get-Command Assert-LibraryPath -ErrorAction SilentlyContinue)){return $false}
+    try{$null=Assert-LibraryPath $root;return [IO.Path]::GetDirectoryName($root) -cmatch '\\[a-f0-9]{24}\\[a-f0-9]{32}$'}catch{return $false}
 }
 
 function Remove-AsusRoot([string]$root) {
     Assert-AsusRoot $root
-    if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force}
+    if(Test-Path -LiteralPath $root){Initialize-AsusTrust;$null=[DriverLoom.Security.AsusTrust]::Files($root);Remove-Item -LiteralPath $root -Recurse -Force}
 }
 
 function Expand-AsusArchive([string]$archive,[string]$root,[string]$cancel) {
@@ -117,6 +123,7 @@ function Test-AsusCatalogMember([string]$path,[string]$catalog) {Initialize-Asus
 
 function Assert-AsusResult($result) {
     Assert-AsusRoot $result.Root;Initialize-AsusTrust
+    if((Test-PersistentAsusRoot $result.Root) -and [IO.Path]::GetDirectoryName($result.Root) -cne [IO.Path]::GetDirectoryName($result.ArchivePath)){throw 'The extracted ASUS setup does not belong to this saved ZIP.'}
     if($result.Path -cne (Join-Path $result.Root 'AsusSetup.exe')){throw 'The ASUS setup path changed.'}
     if(!(Test-Path -LiteralPath $result.ArchivePath -PathType Leaf) -or (Get-FileHash -LiteralPath $result.ArchivePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $result.ArchiveSHA256 -or ($result.Package.OfficialHash -and $result.Package.OfficialHash -cne $result.ArchiveSHA256)){throw 'The ASUS archive changed after download.'}
     $files=[DriverLoom.Security.AsusTrust]::Files($result.Root)

@@ -10,7 +10,7 @@ ManifestSupportedOS Win10
 !include "FileFunc.nsh"
 
 !define APP "DriverLoom"
-!define VERSION "0.1.21"
+!define VERSION "0.1.22"
 !define UNINSTALL "Software\Microsoft\Windows\CurrentVersion\Uninstall\HardwareUpdateLauncher"
 !ifndef OUTPUT_EXE
   !define OUTPUT_EXE "DriverLoom-Setup.exe"
@@ -22,7 +22,7 @@ InstallDir "$LOCALAPPDATA\Programs\HardwareUpdateLauncher"
 InstallDirRegKey HKCU "${UNINSTALL}" "InstallLocation"
 ShowInstDetails show
 SetCompressor /SOLID lzma
-VIProductVersion "0.1.21.0"
+VIProductVersion "0.1.22.0"
 VIAddVersionKey "ProductName" "${APP}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${APP} Setup"

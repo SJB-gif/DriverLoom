@@ -41,6 +41,7 @@ $directory = Join-Path $env:LOCALAPPDATA 'HardwareUpdateLauncher'
 $settingsPath = Join-Path $directory 'settings.json'
 $inventoryPath = Join-Path $directory 'inventory.json'
 [void][IO.Directory]::CreateDirectory($directory)
+if(!$SmokeTest){try{Maintain-DriverLibrary}catch{Write-Verbose ('Driver cache maintenance: '+$_.Exception.Message)}}
 
 $script:settings = [pscustomobject]@{ Repo = ''; Bios = $false; Sources = @(); Theme = 'Dark'; ShowUnsupported = $false }
 $startupNotice = ''

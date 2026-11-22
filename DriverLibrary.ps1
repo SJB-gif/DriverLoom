@@ -23,7 +23,57 @@ function New-DriverLibraryFolder([string]$key,[string]$area='drivers') {
 function Remove-DriverLibraryFolder([string]$folder) {
     $folder=Assert-LibraryPath $folder
     if($folder -cnotmatch '\\[a-f0-9]{24}\\[a-f0-9]{32}$'){throw 'Refusing to remove a library parent.'}
-    if(Test-Path -LiteralPath $folder){Initialize-AsusTrust;$null=[DriverLoom.Security.AsusTrust]::Files($folder);Remove-Item -LiteralPath $folder -Recurse -Force}
+    if(Test-Path -LiteralPath $folder){if(Test-DriverFolderInUse $folder){return};Initialize-AsusTrust;$null=[DriverLoom.Security.AsusTrust]::Files($folder);Remove-Item -LiteralPath $folder -Recurse -Force}
+}
+function Get-DriverBootSession {
+    if(!$script:driverBootSession){
+        try{$script:driverBootSession=(Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime().ToString('o')}
+        catch{$script:driverBootSession='unknown'}
+    }
+    return $script:driverBootSession
+}
+function Test-PreparedSetupInUse([string]$root) {
+    $marker=$root+'.started.json'
+    if(!(Test-Path -LiteralPath $marker -PathType Leaf)){return $false}
+    try{
+        if((Get-Item -LiteralPath $marker).Length -gt 4096){return $true}
+        $session=(Get-Content -LiteralPath $marker -Raw|ConvertFrom-Json).BootSession
+        $current=Get-DriverBootSession
+        return !$session -or $session -eq 'unknown' -or $current -eq 'unknown' -or $session -ceq $current
+    }catch{return $true}
+}
+function Test-DriverFolderInUse([string]$folder) {
+    foreach($setup in Get-ChildItem -LiteralPath $folder -Directory -Force|Where-Object Name -cmatch '^setup-[a-f0-9]{8}$'){
+        if(Test-PreparedSetupInUse $setup.FullName){return $true}
+    }
+    return $false
+}
+function Clear-PreparedDriverFolders([string]$folder,[switch]$KeepNewest) {
+    $folder=Assert-LibraryPath $folder
+    $setups=@(Get-ChildItem -LiteralPath $folder -Directory -Force|Where-Object Name -cmatch '^setup-[a-f0-9]{8}$'|Sort-Object CreationTimeUtc -Descending)
+    foreach($setup in $setups){
+        if(($KeepNewest -and $setup.FullName -ceq $setups[0].FullName) -or (Test-PreparedSetupInUse $setup.FullName)){continue}
+        Remove-AsusRoot $setup.FullName
+        $marker=$setup.FullName+'.started.json';if(Test-Path -LiteralPath $marker){[IO.File]::Delete($marker)}
+    }
+}
+function Maintain-DriverLibrary {
+    $busy=$null
+    if([Threading.Mutex]::TryOpenExisting('Local\DriverLoom.DriverInstall',[ref]$busy)){$busy.Dispose();return}
+    $entries=@(Get-DriverLibrary)
+    foreach($entry in $entries){Clear-PreparedDriverFolders $entry.Folder -KeepNewest}
+    foreach($key in $entries.DeviceKey|Select-Object -Unique){Limit-DriverLibrary $key}
+}
+function Register-PreparedSetupLaunch($result) {
+    if(!(Test-PersistentAsusRoot $result.Root)){return}
+    Save-Json ($result.Root+'.started.json') @{BootSession=Get-DriverBootSession;OpenedAt=[DateTimeOffset]::UtcNow.ToString('o')}
+}
+function Get-SavedPackageFormat([string]$path) {
+    $stream=[IO.File]::OpenRead($path)
+    try{$header=[byte[]]::new(4);$count=$stream.Read($header,0,4)}finally{$stream.Dispose()}
+    if($count -ge 2 -and $header[0] -eq 0x4d -and $header[1] -eq 0x5a){return 'EXE'}
+    if($count -eq 4 -and $header[0] -eq 0x50 -and $header[1] -eq 0x4b -and (($header[2] -eq 3 -and $header[3] -eq 4) -or ($header[2] -eq 5 -and $header[3] -eq 6) -or ($header[2] -eq 7 -and $header[3] -eq 8))){return 'ZIP'}
+    throw 'The saved download is not a supported EXE or ZIP package.'
 }
 function Read-DriverLibraryEntry([string]$folder) {
     $folder=Assert-LibraryPath $folder;$path=Join-Path $folder 'package.json'
@@ -48,7 +98,7 @@ function Get-DriverLibrary {
 function Move-DriverEntry($entry,[string]$area) {
     $folder=Assert-LibraryPath $entry.Folder
     $target=Assert-LibraryPath (Join-Path (Get-DriverLibraryRoot) ($area+'\'+(Get-DriverDeviceId $entry.DeviceKey)+'\'+[IO.Path]::GetFileName($folder)))
-    if($folder -ine $target){[void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target));Move-Item -LiteralPath $folder -Destination $target;$entry.Folder=$target}
+    if($folder -ine $target){if(Test-DriverFolderInUse $folder){return $entry};[void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target));Move-Item -LiteralPath $folder -Destination $target;$entry.Folder=$target}
     return $entry
 }
 function Limit-DriverLibrary([string]$key) {
@@ -112,8 +162,14 @@ function Prepare-SavedDriver([string]$folder,[string]$cancel='') {
     $entry=Read-DriverLibraryEntry $folder
     if($entry.Kind -ne 'Installer'){throw 'This saved version is a Windows driver export.'}
     $null=Assert-LibraryDevice $entry (Get-HardwareInventory);$path=Assert-LibraryFile $entry
-    if($entry.Package.Family -ne 'ASUSDriver'){return [pscustomobject]@{Path=$path;Package=$entry.Package;Bytes=$entry.Bytes;SHA256=$entry.SHA256}}
-    $root=Join-Path ([IO.Path]::GetTempPath()) ('DriverLoom-ASUS-'+[guid]::NewGuid().ToString('N'))
+    $format=Get-SavedPackageFormat $path
+    if($format -eq 'EXE'){
+        if($entry.Package.Family -eq 'ASUSDriver' -or [IO.Path]::GetExtension($path) -ine '.exe'){throw 'This saved package does not match its expected installer format.'}
+        return [pscustomobject]@{Path=$path;Package=$entry.Package;Bytes=$entry.Bytes;SHA256=$entry.SHA256}
+    }
+    if($entry.Package.Family -ne 'ASUSDriver' -or [IO.Path]::GetExtension($path) -ine '.zip'){throw 'This ZIP has no verified setup adapter. Use its official vendor source.'}
+    Clear-PreparedDriverFolders $entry.Folder
+    $root=Join-Path $entry.Folder ('setup-'+[guid]::NewGuid().ToString('N').Substring(0,8))
     try{
         if(!$cancel){$cancel=Join-Path $entry.Folder 'cancel-unused'}
         Expand-AsusArchive $path $root $cancel

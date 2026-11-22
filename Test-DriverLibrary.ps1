@@ -21,13 +21,17 @@ function Invoke-DriverExportCommand($inf,$folder){
     [IO.File]::WriteAllText((Join-Path $folder 'driver.sys'),'fixture driver; never installed')
 }
 function New-LibraryInstaller([string]$version,[switch]$DeferRetention){
-    $folder=New-DriverLibraryFolder $script:device.Key;$file=Join-Path $folder 'NVIDIA-Driver-Setup.exe';[IO.File]::WriteAllText($file,('fixture '+$version))
+    $folder=New-DriverLibraryFolder $script:device.Key;$file=Join-Path $folder 'NVIDIA-Driver-Setup.exe';[IO.File]::WriteAllText($file,('MZ fixture '+$version))
     Set-Content -LiteralPath $file -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3" -Encoding ASCII
     $package=New-ManagedPackage 'NvidiaDesktop' $script:device (Get-WindowsDriverTarget '10.0.26300.0') $version 'https://www.nvidia.com/en-us/drivers/details/12345/' ('https://us.download.nvidia.com/Windows/'+$version+'/'+$version+'-desktop-win10-win11-64bit-international-dch-whql.exe')
     Save-DriverDownload ([pscustomobject]@{Path=$file;Package=$package;Bytes=(Get-Item -LiteralPath $file).Length;SHA256=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()}) $script:device -DeferRetention:$DeferRetention
 }
 try{
     $env:LOCALAPPDATA=$root
+    $script:driverBootSession='fixture-boot-1'
+    $fakeZip=Join-Path $root 'wrong.zip';[void][IO.Directory]::CreateDirectory($root);[IO.File]::WriteAllText($fakeZip,'not a ZIP')
+    Reject-LibraryTest {Get-SavedPackageFormat $fakeZip} 'a ZIP extension cannot disguise invalid data'
+    Reject-LibraryTest {Start-ManagedPackage ([pscustomobject]@{Path=$fakeZip})} 'ZIP archive cannot be dispatched to Windows'
     $script:board=New-HardwareRow 'Motherboard' 'ASUSTeK' 'Fixture board' '' '' '' @()
     $script:device=New-HardwareRow 'GPU driver' 'NVIDIA' 'NVIDIA GeForce RTX 4080 SUPER' '' '' '31.0.1.0' @('PCI\VEN_10DE&DEV_2702')
     $script:infText=@'
@@ -93,7 +97,34 @@ Device="Fixture GPU"
     $savedAsus=Save-DriverDownload ([pscustomobject]@{Path=$setup;Root=$asusRoot;Package=$asusPackage;ArchivePath=$archive;ArchiveSHA256=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant();FileNames=$files;FileHashes=[DriverLoom.Security.AsusTrust]::HashFiles($asusRoot,$files);Proof=Get-AsusDriverProof $asusRoot $asusPackage}) $script:device
     Assert-LibraryTest $false (Test-Path -LiteralPath $asusRoot) 'download keeps only the durable ASUS archive'
     $preparedAsus=Prepare-SavedDriver $savedAsus.Folder
-    try{Assert-LibraryTest 'PCI\VEN_8086&DEV_15F3&REV_03' $preparedAsus.Proof.HardwareId 'ASUS archive prepares and verifies offline after reload'}finally{Remove-AsusRoot $preparedAsus.Root}
+    Assert-LibraryTest 'ZIP' (Get-SavedPackageFormat $archive) 'actual ZIP content is detected'
+    Assert-LibraryTest 'PCI\VEN_8086&DEV_15F3&REV_03' $preparedAsus.Proof.HardwareId 'ASUS archive prepares and verifies offline after reload'
+    Assert-LibraryTest $savedAsus.Folder ([IO.Path]::GetDirectoryName($preparedAsus.Root)) 'extracted setup stays beside the saved ZIP'
+    Assert-LibraryTest $true (Test-PersistentAsusRoot $preparedAsus.Root) 'persistent root is constrained to this library version'
+    $script:launches=0
+    function Start-Process {param($FilePath,$WorkingDirectory,[switch]$PassThru)
+        Assert-LibraryTest (Join-Path $preparedAsus.Root 'AsusSetup.exe') $FilePath 'only extracted setup is dispatched'
+        Assert-LibraryTest $preparedAsus.Root $WorkingDirectory 'vendor setup uses the full extracted directory'
+        $script:launches++;return [pscustomobject]@{HasExited=$true}
+    }
+    $null=Start-ManagedPackage $preparedAsus
+    Assert-LibraryTest 1 $script:launches 'one verified EXE reaches the mocked launcher'
+    Clear-PreparedDriverFolders $savedAsus.Folder
+    Assert-LibraryTest $true (Test-Path -LiteralPath $preparedAsus.Path) 'launched payload is retained for vendor child processes'
+    Remove-DriverLibraryFolder $savedAsus.Folder
+    Assert-LibraryTest $true (Test-Path -LiteralPath $archive) 'retention cannot delete an in-use setup version'
+    $beforeMove=$savedAsus.Folder;$notMoved=Move-DriverEntry $savedAsus 'backups'
+    Assert-LibraryTest $beforeMove $notMoved.Folder 'retention cannot move an in-use setup version'
+    Assert-LibraryTest $true (Test-Path -LiteralPath $preparedAsus.Path) 'external setup retains its original working directory'
+    $preparedAgain=Prepare-SavedDriver $savedAsus.Folder
+    Assert-LibraryTest $true ($preparedAgain.Root -cne $preparedAsus.Root) 'new preparation never overwrites a launched setup folder'
+    Remove-AsusRoot $preparedAgain.Root
+    Assert-LibraryTest $true (Test-Path -LiteralPath $archive) 'cancelled preparation leaves the ZIP available'
+    $script:driverBootSession='fixture-boot-2'
+    Clear-PreparedDriverFolders $savedAsus.Folder -KeepNewest
+    Assert-LibraryTest $true (Test-Path -LiteralPath $preparedAsus.Path) 'latest extracted folder persists across restarts'
+    Clear-PreparedDriverFolders $savedAsus.Folder
+    Assert-LibraryTest $false (Test-Path -LiteralPath $preparedAsus.Root) 'stale preparation can be replaced after a reboot'
     foreach($path in @($root,(Join-Path (Get-DriverLibraryRoot) 'drivers'),(Join-Path (Get-DriverLibraryRoot) 'drivers\..\outside'))){Reject-LibraryTest {Remove-DriverLibraryFolder $path} 'unsafe library cleanup accepted'}
     # Native lookup is read-only: no Stage call and install=false on a present Windows fixture.
     $nativeChecked=$false

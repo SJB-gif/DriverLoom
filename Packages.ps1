@@ -153,7 +153,9 @@ function Receive-ManagedPackage($selection,[string]$folder) {
 }
 
 function Start-ManagedPackage($result) {
+    if([IO.Path]::GetExtension([string]$result.Path) -ine '.exe'){throw 'A ZIP archive cannot be launched. Prepare its verified setup executable first.'}
     Assert-VerifiedPackage $result
+    if($result.Package.Family -eq 'ASUSDriver'){Register-PreparedSetupLaunch $result}
     # No silent switches, pre-accepted licences, forced restarts or driver-rank overrides.
     Start-Process -FilePath $result.Path -WorkingDirectory ([IO.Path]::GetDirectoryName($result.Path)) -PassThru
 }
