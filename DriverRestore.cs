@@ -10,6 +10,12 @@ namespace DriverLoom.Security
     public static class DriverRestore
     {
         [StructLayout(LayoutKind.Sequential)] struct Device { public uint Size; public Guid Class; public uint DevInst; public IntPtr Reserved; }
+        [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct InstallParameters
+        {
+            public uint Size, Flags, FlagsEx; public IntPtr Parent, Callback, Context, FileQueue, ClassReserved;
+            public uint Reserved;
+            [MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)] public string DriverPath;
+        }
         [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] struct Driver
         {
             public uint Size, Type; public IntPtr Reserved;
@@ -29,6 +35,8 @@ namespace DriverLoom.Security
         [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr SetupDiGetClassDevs(IntPtr guid,string enumerator,IntPtr parent,uint flags);
         [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool SetupDiOpenDeviceInfo(IntPtr set,string instance,IntPtr parent,uint flags,ref Device device);
         [DllImport("setupapi.dll",SetLastError=true)] static extern bool SetupDiBuildDriverInfoList(IntPtr set,ref Device device,uint type);
+        [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool SetupDiGetDeviceInstallParams(IntPtr set,ref Device device,ref InstallParameters parameters);
+        [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool SetupDiSetDeviceInstallParams(IntPtr set,ref Device device,ref InstallParameters parameters);
         [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool SetupDiEnumDriverInfo(IntPtr set,ref Device device,uint type,uint index,ref Driver driver);
         [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool SetupDiGetDriverInfoDetail(IntPtr set,ref Device device,ref Driver driver,IntPtr detail,uint size,out uint needed);
         [DllImport("setupapi.dll")] static extern bool SetupDiDestroyDriverInfoList(IntPtr set,ref Device device,uint type);
@@ -44,6 +52,12 @@ namespace DriverLoom.Security
             try
             {
                 if(!SetupDiOpenDeviceInfo(set,instance,IntPtr.Zero,0,ref device)) throw new Win32Exception();
+                InstallParameters parameters=new InstallParameters {Size=(uint)Marshal.SizeOf(typeof(InstallParameters))};
+                if(!SetupDiGetDeviceInstallParams(set,ref device,ref parameters)) throw new Win32Exception();
+                // PnP packages commonly use ExcludeFromSelect. Include them in the compatible
+                // list, restricted to published local INFs, without filtering out older versions.
+                parameters.FlagsEx=(parameters.FlagsEx & ~0x04a00000u) | 0x80000800u;
+                if(!SetupDiSetDeviceInstallParams(set,ref device,ref parameters)) throw new Win32Exception();
                 if(!SetupDiBuildDriverInfoList(set,ref device,2)) throw new Win32Exception(); built=true;
                 Version expected=new Version(version);
                 ulong wanted=((ulong)expected.Major<<48)|((ulong)expected.Minor<<32)|((ulong)Math.Max(0,expected.Build)<<16)|(uint)Math.Max(0,expected.Revision);
