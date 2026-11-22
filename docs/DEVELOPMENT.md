@@ -1,11 +1,26 @@
 # Development
 
+## Repository layout
+
+| Folder | Contents |
+| --- | --- |
+| `src/` | App scripts, native launcher and bundled artwork in `assets/`. |
+| `installer/` | NSIS setup and the graceful shutdown helper. |
+| `scripts/` | Build tools and asset generation. |
+| `tests/` | Engine, UI, download and installer checks. |
+| `docs/` | User/developer guides, coverage and signing policy. Historical notes are in `archive/` and `releases/`. |
+| `.github/` | GitHub Actions workflow. |
+
+`catalog.json` stays at the repository root for existing app versions. Generated installers and executables go in ignored `dist/`; local working files belong in ignored `.local/`.
+
+Run the commands below from the repository root. For a source-only launch, use `./src/Launch.ps1` in 64-bit Windows PowerShell 5.1 with STA enabled. The installed payload keeps its existing flat layout and data paths.
+
 ## Build and test
 
 Use Windows 10/11 x64, 64-bit Windows PowerShell 5.1 and stock NSIS 3.11 or later:
 
 ```powershell
-.\Build.ps1 -MakeNSIS 'C:\Program Files (x86)\NSIS\makensis.exe'
+.\scripts\Build.ps1 -MakeNSIS 'C:\Program Files (x86)\NSIS\makensis.exe'
 ```
 
 The build prepares icon formats, compiles the native x64 .NET Framework host, runs engine, manufacturer, coverage, UI/theme and native-host checks, and creates `dist\DriverLoom-Setup.exe` with a SHA-256 sidecar. Both the installer finish page and Start menu launch `DriverLoom.exe`. The embedded engine uses Windows PowerShell 5.1. No extra runtime download is required.
@@ -13,14 +28,14 @@ The build prepares icon formats, compiles the native x64 .NET Framework host, ru
 On a disposable Windows user or clean test machine, run:
 
 ```powershell
-.\Test-Installer.ps1
+.\tests\Test-Installer.ps1
 ```
 
 This installs into a temporary path with spaces, verifies payload hashes, taskbar identity and icon metadata, tests both launch paths, and uninstalls. It refuses to replace an existing installation. Tests isolate saved settings and do not install drivers, reboot, write to USB or flash firmware.
 
 GitHub Actions runs the build and installer checks and uploads the EXE and checksum as a workflow artifact. The workflow has read-only repository permissions. Publishing a GitHub release is a separate operation.
 
-Manufacturer SVGs are pinned to the Simple Icons commit and hashes in `assets/manufacturers/manifest.json`. The Windows build rasterises their paths with WPF into dark/light PNGs. Runtime rendering uses bundled PNGs and falls back to category symbols. Source notices and brand-source links are included in the installer.
+Manufacturer SVGs are pinned to the Simple Icons commit and hashes in `src/assets/manufacturers/manifest.json`. The Windows build rasterises their paths with WPF into dark/light PNGs. Runtime rendering uses bundled PNGs and falls back to category symbols. Source notices and brand-source links are included in the installer.
 
 `AppUpdates.ps1` reads only the fixed DriverLoom latest-release API, accepts published stable numeric versions and validates exact project release/installer URLs. It has no automatic binary execution or dependency on the configurable hardware catalog. Startup checks run in a background job; background tray starts defer the notification until the window is shown.
 

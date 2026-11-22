@@ -46,10 +46,10 @@ jobs:
           "DRIVERLOOM_MAKENSIS=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Test and build the single-file installer
         shell: powershell
-        run: .\Build.ps1 -MakeNSIS "$env:DRIVERLOOM_MAKENSIS"
+        run: .\scripts\Build.ps1 -MakeNSIS "$env:DRIVERLOOM_MAKENSIS"
       - name: Verify installation and Windows launch paths
         shell: powershell
-        run: .\Test-Installer.ps1
+        run: .\tests\Test-Installer.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: DriverLoom-Setup
